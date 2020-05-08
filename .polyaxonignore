@@ -11,3 +11,7 @@ var
 .DS_Store
 ./.polyaxon
 *.mp4v
+*.h5
+*.nii
+*.npy
+checkpoint*

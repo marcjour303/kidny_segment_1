@@ -57,6 +57,7 @@ class DiceLoss(_WeightedLoss):
         numerator = 2 * intersection.sum(0).sum(1).sum(1)
         denominator = output + target
         denominator = denominator.sum(0).sum(1).sum(1) + eps
+        #print("Val: ", (numerator / denominator))
         loss_per_channel = 1 - (numerator / denominator)
 
         return loss_per_channel.sum() / output.size(1)
@@ -183,7 +184,7 @@ class CombinedLoss(_Loss):
         self.focal_loss = FocalLoss()
         self.l2_loss = nn.MSELoss()
 
-    def forward(self, input, target, weight=None):
+    def forward(self, input, target, class_weight=None, weight=None):
         """
         Forward pass
 
@@ -194,20 +195,20 @@ class CombinedLoss(_Loss):
         """
         input_soft = F.softmax(input, dim=1)
         y_2 = torch.mean(self.dice_loss(input_soft, target))
-        if weight is None:
+        if class_weight is None:
             y_1 = torch.mean(self.cross_entropy_loss.forward(input, target))
         else:
-            y_1 = torch.mean(
-                #torch.mul(self.cross_entropy_loss.forward(input, target), weight))
-                torch.mul(self.cross_entropy_loss.forward(input, target), weight.cuda()))
-        return y_1 + y_2
+            y_0 = self.cross_entropy_loss.forward(input, target)
+            y_1 = torch.mean(torch.mul(y_0, class_weight.cuda()))
+            if weight is None:
+                return y_1 + y_2
+            y_3 = torch.mul(y_1, weight)
+            y_3 = y_3.sum() / weight.sum()
+        return y_3 + y_2
 
 
 # Credit to https://github.com/clcarwin/focal_loss_pytorch
 class FocalLoss(nn.Module):
-    """
-    Focal Loss for Dense Object Detection
-    """
 
     def __init__(self, gamma=2, alpha=None, size_average=True):
 

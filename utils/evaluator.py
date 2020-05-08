@@ -9,11 +9,8 @@ import utils.common_utils as common_utils
 import utils.data_utils as du
 
 import utils.kits_data_utils as kutils
-
-from utils.data_utils import get_imdb_dataset, get_test_dataset
-
 import matplotlib.pyplot as plt
-
+#import visualize as vu
 
 def dice_confusion_matrix(vol_output, ground_truth, num_classes, no_samples=10, mode='train'):
     dice_cm = torch.zeros(num_classes, num_classes)
@@ -66,13 +63,6 @@ def evaluate_dice_score(model, test_loader, model_path, num_classes, data_dir, v
 
     batch_size = 2
     volumes_to_use = []
-    print("Loading test cases from : ", volumes_txt_file)
-    try:
-        with open(volumes_txt_file, 'r') as tst:
-            test_case_ids = json.load(tst)
-            volumes_to_use = test_case_ids['test_cases']
-    except IOError:
-        print("No evaluation data")
 
     print("Running on: ", device)
     print("Using model from: ", model_path)
@@ -83,7 +73,7 @@ def evaluate_dice_score(model, test_loader, model_path, num_classes, data_dir, v
     else:
         # model.load_state_dict(torch.load(model_path, map_location=device))
         model = torch.load(model_path, map_location=device)
-    print("The model is loaded successfuly");
+    print("The model is loaded successfuly")
     cuda_available = torch.cuda.is_available()
     if cuda_available:
         torch.cuda.empty_cache()
@@ -94,23 +84,60 @@ def evaluate_dice_score(model, test_loader, model_path, num_classes, data_dir, v
     common_utils.create_if_not(prediction_path)
     volume_dice_score_list = []
     print("Evaluating now...")
-    #file_paths = du.load_file_paths(data_dir, volumes_to_use)
-    print(volumes_to_use)
-    filtered_vols = kutils.filter_file_list(volumes_to_use)
-    vol_files = kutils.get_data_paths(data_dir, filtered_vols)
-    file_paths = [
-        [os.path.join(vol, 'imaging.nii.gz'), os.path.join(vol, 'only_kidney_seg.nii.gz')]
-        for
-        vol in vol_files]
+    eval_on_test = False
+    eval_on_train = True
+    eval_on_validate = False
+    file_paths = []
+    visu_dir = "eval"
+
+    if eval_on_test:
+        print("Loading test cases from : ", volumes_txt_file)
+        try:
+            with open(volumes_txt_file, 'r') as tst:
+                test_case_ids = json.load(tst)
+                volumes_to_use = test_case_ids['test_cases']
+        except IOError:
+            print("No evaluation data")
+        print(volumes_to_use)
+        vol_files = kutils.get_data_paths(data_dir, volumes_to_use)
+
+        file_paths = [
+            [os.path.join(vol, 'imaging.nii.gz'), os.path.join(vol, 'segmentation.nii.gz')]
+            for
+            vol in vol_files]
+
+        visu_dir = "eval"
+    elif eval_on_train:
+        try:
+            with open("E:\\quicknat-master\\datasets\\train_data.json", 'r') as tst:
+                test_case_ids = json.load(tst)
+                file_paths = test_case_ids['cases']
+                n = len(file_paths)
+                file_paths = file_paths[:int(n*0.8)]
+                print("evaluating on training data")
+        except IOError:
+            print("No train data")
+        visu_dir = "train"
+    elif eval_on_validate:
+        try:
+            with open("E:\\quicknat-master\\datasets\\val_data.json", 'r') as tst:
+                test_case_ids = json.load(tst)
+                file_paths = test_case_ids['cases']
+                file_paths = file_paths[:2]
+                print("evaluating on training data")
+        except IOError:
+            print("No validation data")
+        visu_dir = "validate"
+
     print(file_paths)
     with torch.no_grad():
         for vol_idx, file_path in enumerate(file_paths):
-            volume, labelmap, class_weights, weights, header = du.load_and_preprocess(file_path,
+            volume_loaded, labelmap, class_weights, weights, header = du.load_and_preprocess(file_path,
                                                                                       orientation=orientation,
                                                                                       remap_config=remap_config,
                                                                                       downsample=downsample)
 
-            volume = volume if len(volume.shape) == 4 else volume[:, np.newaxis, :, :]
+            volume = volume_loaded if len(volume_loaded.shape) == 4 else volume_loaded[:, np.newaxis, :, :]
             volume, labelmap = torch.tensor(volume).type(torch.FloatTensor), torch.tensor(labelmap).type(
                 torch.LongTensor)
 
@@ -131,15 +158,22 @@ def evaluate_dice_score(model, test_loader, model_path, num_classes, data_dir, v
             # volume_dice_score = dice_score_perclass(volume_prediction, labelmap.cuda(device), num_classes, mode=mode)
 
             volume_prediction = (volume_prediction.cpu().numpy()).astype('float32')
-            #nifti_img = nib.MGHImage(np.squeeze(volume_prediction), np.eye(4), header=header)
+
             print("Input shape : ", volume.shape)
             print("The shape of the result: ", volume_prediction.shape)
-            nifti_img = nib.MGHImage(volume_prediction, np.eye(4), header=header)
+            #nifti_img = nib.MGHImage(volume_prediction, np.eye(4), header=header)
 
-            pred_file_path = os.path.join(prediction_path, kutils.get_full_case_id(filtered_vols[vol_idx]) + str('_pred.nii'))
-            print(pred_file_path)
-            nib.save(nifti_img, pred_file_path)
-            
+            case_path, file_name = os.path.split(file_path[0])
+            data_pt, case_name = os.path.split(case_path)
+
+            #pred_file_path = os.path.join(prediction_path, case_name + str('_pred.nii'))
+            #print(pred_file_path)
+            #nib.save(nifti_img, pred_file_path)
+
+            print("Estimate background vals: ", np.count_nonzero(volume_prediction == 0))
+            print("Estimate kidney vals: ", np.count_nonzero(volume_prediction == 1))
+
+            #vu.visualize(case_name, volume_loaded, volume_prediction, os.path.join(prediction_path, visu_dir))
             # if logWriter:
             #    logWriter.plot_dice_score('val', 'eval_dice_score', volume_dice_score, volumes_to_use[vol_idx], vol_idx)
 

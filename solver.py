@@ -3,18 +3,22 @@ import os
 
 import numpy as np
 import torch
-#from nn_common_modules import losses as additional_losses
+# from nn_common_modules import losses as additional_losses
 import losses as additional_losses
 from torch.optim import lr_scheduler
 
 import utils.common_utils as common_utils
 from utils.log_utils import LogWriter
 
+import matplotlib.pyplot as plt
+from pathlib import Path
+import random
 import polyaxon_helper
+from torch.autograd import Variable
 
-CHECKPOINT_DIR = "tst" #os.path.join(polyaxon_helper.get_outputs_path(), 'checkpoints')
+CHECKPOINT_DIR = "tst"  # os.path.join(polyaxon_helper.get_outputs_path(), 'checkpoints')
 
-#CHECKPOINT_DIR = 'checkpoints'
+# CHECKPOINT_DIR = 'checkpoints'
 CHECKPOINT_EXTENSION = 'pth.tar'
 
 
@@ -48,6 +52,8 @@ class Solver(object):
             self.loss_func = loss_func.cuda(device)
         else:
             self.loss_func = loss_func
+
+        print("Optimization arguments: ", optim_args)
         self.optim = optim(model.parameters(), **optim_args)
         self.scheduler = lr_scheduler.StepLR(self.optim, step_size=lr_scheduler_step_size,
                                              gamma=lr_scheduler_gamma)
@@ -58,6 +64,7 @@ class Solver(object):
         self.exp_dir_path = exp_dir_path
 
         self.log_nth = log_nth
+        print(log_dir)
         self.logWriter = LogWriter(num_class, log_dir, exp_name, use_last_checkpoint, labels)
 
         self.use_last_checkpoint = use_last_checkpoint
@@ -72,6 +79,7 @@ class Solver(object):
             self.load_checkpoint()
 
     # TODO:Need to correct the CM and dice score calculation.
+    #@profile
     def train(self, train_loader, val_loader):
         """
         Train a given model with the provided data.
@@ -91,7 +99,7 @@ class Solver(object):
             model.cuda(self.device)
 
         print('START TRAINING. : model name = %s, device = %s' % (
-           self.model_name, torch.cuda.get_device_name(self.device)))
+            self.model_name, torch.cuda.get_device_name(self.device)))
         current_iteration = self.start_iteration
 
         for epoch in range(self.start_epoch, self.num_epochs + 1):
@@ -103,25 +111,29 @@ class Solver(object):
                 y_list = []
                 if phase == 'train':
                     model.train()
-                    scheduler.step()
                 else:
                     model.eval()
-                print("\nStarting enumeration")
+
                 for i_batch, sample_batched in enumerate(dataloaders[phase]):
+
                     X = sample_batched[0].type(torch.FloatTensor)
                     y = sample_batched[1].type(torch.LongTensor)
                     w = sample_batched[2].type(torch.FloatTensor)
 
                     if model.is_cuda:
-                        X, y, w = X.cuda(self.device, non_blocking=True), y.cuda(self.device,
-                                   non_blocking=True), w.cuda(self.device, non_blocking=True)
+                        X, y, w = X.cuda(self.device, non_blocking=True), \
+                                  y.cuda(self.device, non_blocking=True), \
+                                  w.cuda(self.device, non_blocking=True)
 
                     output = model(X)
-                    loss = self.loss_func(output, y, w)
+
+                    #loss = self.loss_func(output, y, binary=True)
+                    loss  = self.loss_func(output, y, w)
                     if phase == 'train':
                         optim.zero_grad()
                         loss.backward()
                         optim.step()
+                        scheduler.step()
                         if i_batch % self.log_nth == 0:
                             self.logWriter.loss_per_iter(loss.item(), i_batch, current_iteration)
                         current_iteration += 1
@@ -140,14 +152,33 @@ class Solver(object):
                         else:
                             print("100%", flush=True)
 
+                #out_path = Path(os.path.join("E:\\", "label_vis_data_utils", "predictions", phase))
+                #if not out_path.exists():
+                #    out_path.mkdir()
+
                 with torch.no_grad():
                     out_arr, y_arr = torch.cat(out_list), torch.cat(y_list)
                     self.logWriter.loss_per_epoch(loss_arr, phase, epoch)
-                    #index = np.random.choice(len(dataloaders[phase].dataset.X), 3, replace=False)
-                    #self.logWriter.image_per_epoch(model.predict(dataloaders[phase].dataset.X[index], self.device),
-                    #                               dataloaders[phase].dataset.y[index], phase, epoch)
+                    data_len = len(dataloaders[phase].dataset)
+                    index = np.random.choice(data_len, 5, replace=False)
+                    for idx in index:
+                        #print("Logging image with index: ", idx)
+                        v_img, v_label, w, _ = dataloaders[phase].dataset[idx]
+                        name_val = random.randint(1, 100)
+                        self.logWriter.image_per_epoch(model.predict(v_img.unsqueeze(dim=0), self.device), v_label, phase, epoch)
+                        prediction = model.predict(v_img.unsqueeze(dim=0), self.device)
+                        #fig, ax = plt.subplots(1, 4)
+                        #_ = ax[0].imshow(v_label, cmap='Greys', vmax=abs(v_label).max(), vmin=abs(v_label).min())
+                        #_ = ax[1].imshow(v_img.squeeze())
+                        #_ = ax[2].imshow(w)
+                        #_ = ax[3].imshow(prediction)
+                        #fig_path = os.path.join(out_path, str(epoch) + "_" + "_img_" + str(name_val) + "_" + str(phase) + '.jpeg')
+                        #print(str(fig_path))
+                        #fig.savefig(str(fig_path))
+
                     self.logWriter.cm_per_epoch(phase, out_arr, y_arr, epoch)
                     ds_mean = self.logWriter.dice_score_per_epoch(phase, out_arr, y_arr, epoch)
+                    print("Dice score per epoch: ", ds_mean)
                     if phase == 'val':
                         if ds_mean > self.best_ds_mean:
                             self.best_ds_mean = ds_mean
@@ -180,7 +211,7 @@ class Solver(object):
         torch.save(self.model, path)
 
     def save_checkpoint(self, state, filename):
-        print('saving mooodel:',filename)
+        print('saving mooodel:', filename)
         torch.save(state, filename)
 
     def load_checkpoint(self, epoch=None):

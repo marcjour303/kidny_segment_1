@@ -139,17 +139,17 @@ class LogWriter(object):
     def image_per_epoch(self, prediction, ground_truth, phase, epoch):
         print("Sample Images...", end='', flush=True)
         ncols = 2
-        nrows = len(prediction)
+        nrows = 1
         fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 20))
 
-        for i in range(nrows):
-            ax[i][0].imshow(prediction[i], cmap='CMRmap', vmin=0, vmax=self.num_class - 1)
-            ax[i][0].set_title("Predicted", fontsize=10, color="blue")
-            ax[i][0].axis('off')
-            ax[i][1].imshow(ground_truth[i], cmap='CMRmap', vmin=0, vmax=self.num_class - 1)
-            ax[i][1].set_title("Ground Truth", fontsize=10, color="blue")
-            ax[i][1].axis('off')
+        ax[0].imshow(prediction, vmax=abs(prediction).max(), vmin=-abs(prediction).max())
+        ax[0].set_title("Predicted", fontsize=10, color="blue")
+        ax[0].axis('off')
+        ax[1].imshow(ground_truth, vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
+        ax[1].set_title("Ground Truth", fontsize=10, color="blue")
+        ax[1].axis('off')
         fig.set_tight_layout(True)
+
         self.writer[phase].add_figure('sample_prediction/' + phase, fig, epoch)
         print('DONE', flush=True)
 

@@ -1,10 +1,3 @@
-"""
-Convert to h5 utility.
-Sample command to create new dataset
-- python utils/convert_h5.py -dd /home/masterthesis/shayan/nas_drive/Data_Neuro/OASISchallenge/FS -ld /home/masterthesis/shayan/nas_drive/Data_Neuro/OASISchallenge -trv datasets/train_volumes.txt -tev datasets/test_volumes.txt -rc Neo -o COR -df datasets/MALC/coronal
-- python utils/convert_h5.py -dd /home/masterthesis/shayan/nas_drive/Data_Neuro/IXI/IXI_FS -ld /home/masterthesis/shayan/nas_drive/Data_Neuro/IXI/IXI_FS -ds 98,2 -rc FS -o COR -df datasets/IXI/coronal
-"""
-
 import argparse
 import os
 
@@ -17,54 +10,40 @@ import utils.kits_data_utils as kutils
 import utils.preprocessor as preprocessor
 
 
-
-
-def _write_h5(data, label, class_weights, weights, f, mode):
-    print("data shape ", data[0].shape)
-    no_slices, H, W = data[0].shape
-    with h5py.File(f[mode]['data'], "w") as data_handle:
-        data_handle.create_dataset("data", data=np.concatenate(data).reshape((-1, H, W)))
-    with h5py.File(f[mode]['label'], "w") as label_handle:
-        label_handle.create_dataset("label", data=np.concatenate(label).reshape((-1, H, W)))
-    with h5py.File(f[mode]['weights'], "w") as weights_handle:
-        weights_handle.create_dataset("weights", data=np.concatenate(weights))
-    with h5py.File(f[mode]['class_weights'], "w") as class_weights_handle:
-        class_weights_handle.create_dataset("class_weights", data=np.concatenate(
-            class_weights).reshape((-1, H, W)))
-
-
 def convert_h5(data_dir, data_split, l, orientation=preprocessor.ORIENTATION['coronal'], remap_config='Neo', dwSample = 4):
     # Data splitting
-
+    train_file = '..\\datasets\\train_data.json'
+    val_file =  '..\\datasets\\val_data.json'
+    skip_file = '..\\datasets\\dataskip.json'
     if data_split:
-        train_file_paths, test_file_paths = apply_split(data_split, data_dir)
+        train_file_paths, test_file_paths = du.apply_split(skip_file, train_file, val_file, data_split, data_dir)
     else:
         raise ValueError('You must either provide the split ratio or a train, train dataset list')
 
     print("Train dataset size: %d, Test dataset size: %d" % (len(train_file_paths), len(test_file_paths)))
     # loading,pre-processing and writing train data
     print("===Train data===")
-    #data_train, label_train, class_weights_train, weights_train, _ = du.load_dataset(train_file_paths,
-    #                                                                                 orientation,
-    #                                                                                 remap_config=remap_config,
-    #                                                                                 return_weights=True,
-    #                                                                                 reduce_slices=False,
-    #                                                                                 remove_black=False,
-    #                                                                                 downsample=dwSample);
+    data_train, label_train, class_weights_train, weights_train, _ = du.load_dataset(train_file_paths,
+                                                                                     orientation,
+                                                                                     remap_config=remap_config,
+                                                                                     return_weights=True,
+                                                                                     reduce_slices=False,
+                                                                                     remove_black=False,
+                                                                                     downsample=dwSample);
 
-    #_write_h5(data_train, label_train, class_weights_train, weights_train, l, mode='train')
+    du.write_h5(data_train, label_train, class_weights_train, weights_train, l, mode='train')
 
     # loading,pre-processing and writing test data
     print("===Test data===")
-    #data_test, label_test, class_weights_test, weights_test, _ = du.load_dataset(test_file_paths,
-    #                                                                             orientation,
-    #                                                                             remap_config=remap_config,
-    #                                                                             return_weights=True,
-    #                                                                             reduce_slices=False,
-    #                                                                             remove_black=False,
-    #                                                                             downsample=dwSample)
+    data_test, label_test, class_weights_test, weights_test, _ = du.load_dataset(test_file_paths,
+                                                                                 orientation,
+                                                                                 remap_config=remap_config,
+                                                                                 return_weights=True,
+                                                                                 reduce_slices=False,
+                                                                                 remove_black=False,
+                                                                                 downsample=dwSample)
 
-    #_write_h5(data_test, label_test, class_weights_test, weights_test, l, mode='test')
+    du.write_h5(data_test, label_test, class_weights_test, weights_test, l, mode='test')
 
 
 if __name__ == "__main__":

@@ -3,21 +3,16 @@ import os
 import h5py
 import nibabel as nb
 import numpy as np
-import torch
-import torch.utils.data as data
-from torchvision import transforms
-#import preprocessor
+
 import utils.preprocessor as preprocessor
-from PIL import Image
 import random
 from scipy.ndimage.interpolation import map_coordinates
 from scipy import interpolate as ipol
 from sklearn.utils import shuffle
 import utils.kits_data_utils  as kutils
-# ====================================================================================================================
-# Transforms
-# ====================================================================================================================
 
+
+from skimage.transform import resize
 
 class elastic_deform(object):
     def __init__(self, p):
@@ -108,191 +103,100 @@ def elastic_deformation(image, x_coord, y_coord, dx, dy):
 
     return deformed_image.transpose((2, 0, 1))
 
-
-class ToTensor(object):
-    def __call__(self, sample):
-        image, labels, weight = sample['image'], sample['label'], sample['weight']
-
-        #image = norm(np.array(image))
-
-        #print("img shape ", image.shape)
-        #image = image.transpose((2, 0, 1))
-
-        return {'image': torch.from_numpy(image.copy()),
-                'label': torch.from_numpy(labels.copy()),
-                'weight': torch.from_numpy(weight.copy())}
-
-
-def norm(ar):
-    ar = ar - np.min(ar)
-    ar = ar / np.ptp(ar)
-    return ar
-
-
-class RandomVerticalFlip(object):
-    def __init__(self, p):
-        self.p = p
-
-    def __call__(self, data):
-        img = data['image']
-        lab = data['label']
-        wgt = data['weight']
-
-        if random.random() < self.p:
-            img = np.flip(img, axis=0)
-            lab = np.flip(lab, axis=0)
-            wgt = np.flip(wgt, axis=0)
-
-        return {'image': img, 'label': lab, 'weight': wgt}
-
-
-transform_train = transforms.Compose([
-    #transforms.Resize((64, 64)),
-    elastic_deform(p=0.5),
-    RandomVerticalFlip(p=0.5),
-    #transforms.RandomVerticalFlip(),
-    #transforms.RandomCrop(256, pad_if_needed=True),
-    #transforms.RandomCrop(200, padding=56),
-    ToTensor(),
-])
-
-transform_val = transforms.Compose([
-    #transforms.Resize((64, 64)),
-    #transforms.RandomCrop(256, pad_if_needed=True),
-    ToTensor(),
-])
-
 # ====================================================================================================================
-# Data Loader
+# Data Loader Utils
 # ====================================================================================================================
 
 
-class ImdbData(data.Dataset):
-    def __init__(self, X, y, w, w_mfb, transforms=None):
-        self.X = X if len(X.shape) == 4 else X[:, np.newaxis, :, :]
-        self.y = y
-        self.w = w
-        self.w_mfb = w_mfb
-        self.transforms = transforms
-
-    def __getitem__(self, index):
-
-        img = self.X[index]
-        label = self.y[index]
-        weight = self.w[index]
-
-        label_3d = np.expand_dims(label, axis=0)
-        weight_3d = np.expand_dims(weight, axis=0)
-
-        sample = {'image': img, 'label': label_3d, 'weight': weight_3d}
-
-        if self.transforms is not None:
-            sample = self.transforms(sample)
-
-        weight_mfb = torch.from_numpy(self.w_mfb)
-
-        img = sample['image']
-        label = sample['label'].squeeze()
-        weight = sample['weight'].squeeze()
-
-
-        return img, label, weight, weight_mfb
-
-    def __len__(self):
-        return len(self.y)
-
-
-def get_imdb_dataset(data_params):
-    data_train = h5py.File(os.path.join(data_params['data_dir'], data_params['train_data_file']), 'r')
-    label_train = h5py.File(os.path.join(data_params['data_dir'], data_params['train_label_file']), 'r')
-    class_weight_train = h5py.File(os.path.join(data_params['data_dir'], data_params['train_class_weights_file']), 'r')
-    weight_train = h5py.File(os.path.join(data_params['data_dir'], data_params['train_weights_file']), 'r')
-
-    data_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_data_file']), 'r')
-    label_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_label_file']), 'r')
-    class_weight_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_class_weights_file']), 'r')
-    weight_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_weights_file']), 'r')
-
-
-    return (ImdbData(data_train['data'][()], label_train['label'][()], class_weight_train['class_weights'][()],
-                     weight_train['weights'][()], transforms=transform_train),
-            ImdbData(data_test['data'][()], label_test['label'][()], class_weight_test['class_weights'][()],
-                     weight_test['weights'][()], transforms=transform_val))
-
-def get_test_dataset(data_params):
-    data_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_data_file']), 'r')
-    label_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_label_file']), 'r')
-    class_weight_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_class_weights_file']), 'r')
-    weight_test = h5py.File(os.path.join(data_params['data_dir'], data_params['test_weights_file']), 'r')
-
-    return(ImdbData(data_test['data'][()], label_test['label'][()], class_weight_test['class_weights'][()],
-                     weight_test['weights'][()], transforms=None))
-
-
-def load_dataset(file_paths,
-                 orientation,
-                 remap_config,
-                 return_weights=False,
-                 reduce_slices=False,
-                 remove_black=False,
-                 downsample=1):
+def write_dataset_to_h5stream(file_paths, dt_load_params, f, mode):
     print("Loading and preprocessing data...")
-    volume_list, labelmap_list, headers, class_weights_list, weights_list = [], [], [], [], []
 
-    for file_path in file_paths:
-        volume, labelmap, class_weights, weights, header = load_and_preprocess(file_path, orientation,
-                                                                               remap_config=remap_config,
-                                                                               reduce_slices=reduce_slices,
-                                                                               remove_black=remove_black,
-                                                                               return_weights=return_weights,
-                                                                               downsample=downsample)
-
-        volume_list.append(volume)
-        labelmap_list.append(labelmap)
-
-        if return_weights:
-            class_weights_list.append(class_weights)
-            weights_list.append(weights)
-
-        headers.append(header)
-
+    for i, file_path in enumerate(file_paths):
+        volume, labelmap, class_weights, weights = load_and_preprocess(file_path, dt_load_params)
+        if i == 0:
+            with h5py.File(f[mode]['data'], 'w') as data_handle:
+                data_handle.create_dataset('data', data=volume, compression="gzip", chunks=True,
+                                           maxshape=(None,  volume.shape[1], volume.shape[2]))
+            with h5py.File(f[mode]['label'], 'w') as label_handle:
+                label_handle.create_dataset('label', data=labelmap, compression="gzip", chunks=True,
+                                            maxshape=(None, labelmap.shape[1], labelmap.shape[2]))
+            with h5py.File(f[mode]['weights'], 'w') as weights_handle:
+                weights_handle.create_dataset('weights', data=weights, compression="gzip", chunks=True,
+                                              maxshape=(None,))
+            with h5py.File(f[mode]['class_weights'], 'w') as class_weights_handle:
+                class_weights_handle.create_dataset('class_weights', data=class_weights, compression="gzip", chunks=True,
+                                                    maxshape=(None,  class_weights.shape[1], class_weights.shape[2]))
+        else:
+            append_to_h5(volume, labelmap, class_weights, weights, f, mode)
+        del volume, labelmap, class_weights, weights
         print("#", end='', flush=True)
     print("100%", flush=True)
-    if return_weights:
-        return volume_list, labelmap_list, class_weights_list, weights_list, headers
+
+
+def append_to_h5(data, label, class_weights, weights, f, mode):
+    print("data shape ", data[0].shape)
+
+    with h5py.File(f[mode]['data'], 'a') as data_handle:
+        h5_append_with_handler(data_handle, 'data', data)
+    with h5py.File(f[mode]['label'], 'a') as label_handle:
+        h5_append_with_handler(label_handle, 'label', label)
+    with h5py.File(f[mode]['weights'], 'a') as weights_handle:
+        h5_append_with_handler(weights_handle, 'weights', weights)
+    with h5py.File(f[mode]['class_weights'], "w") as class_weights_handle:
+        h5_append_with_handler(class_weights_handle, 'class_weights', class_weights)
+
+
+def h5_append_with_handler(data_handle, data_key, data):
+    data_handle[data_key].resize((data_handle[data_key].shape[0] + data.shape[0]), axis=0)
+    data_handle[data_key][-data.shape[0]:] = data
+
+
+def square_and_resize_volume(volume, targetResolution, nearestNeighbor=False):
+    print('    Resizing from ' + str(volume.shape[0]) + 'x' + str(volume.shape[1]) + 'x' + str(
+        volume.shape[2]) + ' to ' + str(volume.shape[0]) + 'x' + str(targetResolution) + 'x' + str(targetResolution))
+
+    if nearestNeighbor:
+        volume = resize(volume, (volume.shape[0], targetResolution, targetResolution), mode='constant', cval=0,
+                        clip=True, preserve_range=True, anti_aliasing=False, order=0)
     else:
-        return volume_list, labelmap_list, headers
+        volume = resize(volume, (volume.shape[0], targetResolution, targetResolution), mode='constant', cval=0,
+                        clip=True, preserve_range=True, anti_aliasing=False)
+    print("Done resizing")
+    return volume
 
 
-def load_and_preprocess(file_path, orientation, remap_config, reduce_slices=False,
-                        remove_black=False,
-                        return_weights=False, downsample=1):
-    volume, labelmap, header = load_data(file_path, orientation, downsample)
+def load_and_preprocess(file_path, data_load_params):
+    volume, labelmap = load_nft_volumes(file_path,  data_load_params)
+    volume, labelmap, class_weights, weights = preprocess(volume, labelmap, remap_config=data_load_params['remap_config'],
+                                                          reduce_slices=data_load_params['reduce_slices'],
+                                                          remove_black=data_load_params['remove_black'],
+                                                          return_weights=data_load_params['return_weights'])
 
-    volume, labelmap, class_weights, weights = preprocess(volume, labelmap, remap_config=remap_config,
-                                                          reduce_slices=reduce_slices,
-                                                          remove_black=remove_black,
-                                                          return_weights=return_weights)
-    return volume, labelmap, class_weights, weights, header
+    return volume, labelmap, class_weights, weights
 
 
-def load_data(file_path, orientation, downsample=1):
-    print("Loading vol: %s with label: %s and downsampling factor %d" % (file_path[0], file_path[1], downsample));
-    volume_nifty_4d, labelmap_nifty_4d = nb.load(file_path[0]), nb.load(file_path[1])
+def reduce_black_slices_in_volume(volume, label, threshold=10):
+    slicesToDelete = []
+    for i in range(label.shape[0]):
+        slice = label[i, :, :]
+        if slice.max() == 0:
+            remove = True
+            for j in range(max([0, i - threshold]), min([i + threshold, label.shape[0]])):
+                neighboringSlice = label[j, :, :]
+                if neighboringSlice.max() == 1:
+                    remove = False
+                    break
+            if remove:
+                slicesToDelete.append(i)
 
-    # take only three dimensions from volume_nifty_4d
-    volume = np.squeeze(volume_nifty_4d.get_fdata()[::downsample, ::downsample, ::downsample])
-    labelmap = np.squeeze(labelmap_nifty_4d.get_fdata()[::downsample, ::downsample, ::downsample])
-
-    volume = (volume - np.min(volume)) / (np.max(volume) - np.min(volume))
-    volume, labelmap = preprocessor.rotate_orientation(volume, labelmap, orientation)
-
-    # shuffle volume and label slices
-    volume, labelmap = shuffle(volume, labelmap)
-    return volume, labelmap, volume_nifty_4d.header
+    return np.delete(volume, slicesToDelete, axis=0), np.delete(label, slicesToDelete, axis=0)
 
 
 def preprocess(volume, labelmap, remap_config, reduce_slices=False, remove_black=False, return_weights=False):
+    volume = np.clip(volume, -512, 512)
+    volume = (volume - np.min(volume)) / np.max((np.max(volume) - np.min(volume), 1e-3))
+    labelmap = np.where(labelmap == 2, 1, labelmap)
+
     if reduce_slices:
         volume, labelmap = preprocessor.reduce_slices(volume, labelmap)
 
@@ -309,21 +213,45 @@ def preprocess(volume, labelmap, remap_config, reduce_slices=False, remove_black
         return volume, labelmap, None, None
 
 
-def load_file_paths(data_dir):
-    """
-    This function returns the file paths combined as a list where each element is a 2 element tuple, 0th being data and 1st being label.
-    It should be modified to suit the need of the project
-    :param data_dir: Directory which contains the data files
-    :return: list of file paths as string
-    """
+def load_nft_volumes(file_path, load_params):
+    print("Loading vol: %s with label: %s and resolution %d" % (file_path[0], file_path[1], load_params['target_resolution']))
 
-    vols = kutils.get_train_files()
-    #vol_files = kutils.get_data_paths(data_dir, vols)
-    vol_files = kutils.load_file_paths(data_dir)
+    volume = np.squeeze(nb.load(file_path[0]).get_fdata())
+    labelmap = np.squeeze(nb.load(file_path[1]).get_fdata())
 
-    file_paths = [
-        [os.path.join(vol, 'imaging.nii.gz'), os.path.join(vol, 'only_kidney_seg.nii.gz')]
-        for
-        vol in vol_files]
+    print("Volume shape: ", volume.shape)
+    print("Lable shape: ", labelmap.shape)
 
-    return file_paths
+    volume, labelmap = preprocessor.rotate_orientation(volume, labelmap, load_params['orientation'])
+
+    volume = square_and_resize_volume(volume, load_params['target_resolution'], nearestNeighbor=False)
+    labelmap = square_and_resize_volume(labelmap, load_params['target_resolution'], nearestNeighbor=False)
+
+    # shuffle volume and label slices
+    volume, labelmap = shuffle(volume, labelmap)
+
+    return volume, labelmap
+
+
+def apply_split(data_skip, train_file, val_file, data_split, data_dir):
+    file_paths = kutils.load_file_paths(data_skip, data_dir)
+    print("Total no of volumes to process : %d" % len(file_paths))
+    train_ratio, test_ratio = data_split.split(",")
+    train_len = int((int(train_ratio) / 100) * len(file_paths))
+    #train_idx = np.random.choice(len(file_paths), train_len, replace=False)
+    #val_idx = np.array([i for i in range(len(file_paths)) if i not in train_idx])
+    #train_file_paths = [file_paths[i] for i in train_idx]
+    #val_file_paths = [file_paths[i] for i in val_idx]
+    train_file_paths = file_paths[:train_len]
+    val_file_paths = file_paths[train_len:]
+    #train_data['cases'] = np.array(train_file_paths, dtype=int).tolist()
+
+    train_data = {}
+    train_data['cases'] = train_file_paths
+    kutils.write_to_file(train_file, train_data)
+
+    val_data = {}
+    val_data['cases'] = val_file_paths
+    kutils.write_to_file(val_file, val_data)
+
+    return train_file_paths, val_file_paths

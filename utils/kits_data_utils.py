@@ -24,27 +24,32 @@ def write_to_file(filePath, jsonContent):
         print("Failed to write to file")
 
 
-def filter_file_list(file_list):
-    case_files=[]
-    with open('E:\quicknat-master\datasets\dataskip.json', 'r') as f:
-        data_flt = json.load(f)
+def filter_file_list(data_skip, file_list):
+    case_files = []
+    data_flt = []
 
+    data_skip = os.path.join(os.getcwd(), "datasets", "dataskip.json")
+    with open(data_skip, 'r') as f:
+        data_flt = json.load(f)['removal']
+
+    ignore_cases = [get_full_case_id(case) for case in data_flt]
     for cid in file_list:
-        if cid in data_flt['removal']:
+        if cid in ignore_cases:
             continue
         case_files.append(cid)
 
     return case_files
 
 
-def load_file_paths(data_path):
+def load_file_paths(data_skip, data_path):
     case_paths=[]
-    print(data_path)
+
     content = os.listdir(data_path)
     cases = [k for k in content if 'case_' in k]
+    cases = filter_file_list(data_skip, cases)
     case_paths = [os.path.join(data_path, k) for k in cases]
     file_paths = [
-        [os.path.join(vol, 'imaging.nii.gz'), os.path.join(vol, 'only_kidney_seg.nii.gz')]
+        [os.path.join(vol, 'imaging.nii.gz'), os.path.join(vol, 'segmentation.nii.gz')]
         for
         vol in case_paths]
     return file_paths

@@ -1,0 +1,35 @@
+version: 1
+
+kind: group
+
+framework: pytorch
+
+tags: [examples]
+
+environment:
+  resources:
+    cpu:
+      requests: 3
+      limits: 8
+    memory:
+      requests: 1024
+      limits: 4098
+    gpu:
+      requests: 1
+      limits: 1
+
+params:
+  param_name: learning_rate
+
+hptuning:
+  matrix:
+    param_value:
+      values: [0.00001, 0.0001, 0.001, 0.01, 0.1]
+build:
+  image: pytorch/pytorch:1.2-cuda10.0-cudnn7-runtime
+  build_steps:
+    - pip install -r requirements.txt
+    - python -m pip install --user numpy scipy matplotlib ipython jupyter pandas sympy nose
+
+run:
+  cmd: python -u run.py --mode=train --settings=cluster --param_name={{ param_name }} --param_value={{ param_value }}

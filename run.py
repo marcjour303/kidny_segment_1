@@ -5,88 +5,23 @@ import torch
 from settings import Settings as stng
 
 import utils.evaluator as eu
-#import numpy as np
-#import torch
+
 from quicknat import QuickNat
-from settings import Settings
 from solver import Solver
 
-from utils.data_loader import SLDataset
-import utils.kits_data_utils as kutil
-from utils.data_utils import get_imdb_dataset, get_test_dataset
+#utility imports
+import utils.data_utils as du
+from utils.data_loader import DataloaderNII, ToTensor, NiftiData
 from utils.log_utils import LogWriter
 import shutil
-
+import ast
 from torchvision import transforms
-import torchvision.transforms.functional as F
-import numpy as np
-from PIL import Image
-import random
+
 
 from polyaxon_client.tracking import Experiment, get_data_paths
 import polyaxon_helper
 
 torch.set_default_tensor_type('torch.FloatTensor')
-
-class ToTensor(object):
-    def __call__(self, sample):
-        image, labels, weight = sample['image'], sample['label'], sample['weight']
-
-        return {'image': torch.from_numpy(image.copy()),
-                'label': torch.from_numpy(labels.copy()),
-                'weight': torch.from_numpy(weight.copy())}
-
-def norm(ar):
-    ar = ar - np.min(ar)
-    ar = ar / np.ptp(ar)
-    return ar
-
-
-
-class RandomVerticalFlip(object):
-    def __init__(self, p):
-        self.p = p
-
-    def __call__(self, data):
-        img = data['image']
-        lab = data['label']
-        wgt = data['weight']
-
-        if random.random() < self.p:
-            img = np.flip(img, axis=0)
-            lab = np.flip(lab, axis=0)
-            wgt = np.flip(wgt, axis=0)
-
-        return {'image': img, 'label': lab, 'weight': wgt}
-
-class Resize(object):
-    def __init__(self, w, h):
-        self.w = w
-        self.h = h
-
-    def __call__(self, data):
-        img = data['image']
-        lab = data['label']
-        wgt = data['weight']
-
-        img = np.squeeze(img)
-        lab = np.squeeze(lab)
-        wgt = np.squeeze(wgt)
-
-        img = Image.fromarray(img.astype(np.uint8))
-        lab = Image.fromarray(lab.astype(np.uint8))
-        wgt = Image.fromarray(wgt.astype(np.uint8))
-
-        img = F.resize(img, (self.w, self.h))
-        lab = F.resize(lab, (self.w, self.h))
-        wgt = F.resize(wgt, (self.w, self.h))
-
-        img = np.expand_dims(np.asarray(img), axis=0)
-        lab = np.expand_dims(np.asarray(lab), axis=0)
-        wgt = np.expand_dims(np.asarray(wgt), axis=0)
-
-        return {'image': img, 'label': lab, 'weight': wgt}
-
 
 
 transform_train = transforms.Compose([
@@ -97,19 +32,57 @@ transform_val = transforms.Compose([
     ToTensor(),
 ])
 
-def train(train_params, common_params, data_params, net_params):
-    #train_data, test_data = load_data(data_params)
 
-    train_data = SLDataset(data_params, 'train', transform_train)
-    val_data = SLDataset(data_params, 'val', transform_val)
-    print("Loading data from SLDataset");
+def train(train_params, common_params, data_params, net_params):
+    train_files, val_files = du.apply_split(data_params["data_skip"], data_params["train_data_file"], data_params["val_data_file"],
+                                            data_params["data_split"], data_params["data_dir"])
+
+    train_ratio, test_ratio = data_params["data_split"].split(",")
+    tt_ratio = float(test_ratio) / float(train_ratio)
+    train_files = train_files[:10]
+    h5_nr = 10
+    iter_number = len(train_files) // h5_nr
+    idx = 0
+    idx_val = 0
+
+    if False:
+        for i in range(iter_number):
+            c_t_d = train_files[idx:(idx + h5_nr)]
+            c_v_d = val_files[idx_val:int((idx_val + h5_nr) * tt_ratio)]
+            idx = idx + h5_nr
+            idx_val = idx_val + int((idx_val + h5_nr) * tt_ratio)
+            print("idx: " , idx)
+            print("idx_val: ", idx_val)
+            train_data = DataloaderNII(c_t_d, data_params, 'train', transform_train)
+            val_data = DataloaderNII(c_v_d, data_params, 'val', transform_val)
+
+            train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
+            use_pre_trained = True
+
+        if len(train_files)% h5_nr != 0:
+            c_t_d = train_files[idx:]
+            c_v_d = val_files[idx_val:]
+
+            train_data = DataloaderNII(c_t_d, data_params, 'train', transform_train)
+            val_data = DataloaderNII(c_v_d, data_params, 'val', transform_val)
+
+            train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
+    else:
+        train_data = NiftiData(train_files[:1], data_params, train=True)
+        val_data = NiftiData(val_files[:1], data_params, train=False)
+        train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
+
+
+def train_stage(train_data, val_data, train_params, common_params, data_params, net_params):
+
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=train_params['train_batch_size'], shuffle=True,
-                                               num_workers=0, pin_memory=True)
+                                               num_workers=4, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['val_batch_size'], shuffle=False,
-                                             num_workers=0, pin_memory=True)
+                                             num_workers=4, pin_memory=True)
 
     if train_params['use_pre_trained']:
-        quicknat_model = torch.load(train_params['pre_trained_path'])
+        quicknat_model = QuickNat(net_params)
+        quicknat_model.load_state_dict(torch.load(train_params['pre_trained_path']))
     else:
         quicknat_model = QuickNat(net_params)
 
@@ -132,6 +105,8 @@ def train(train_params, common_params, data_params, net_params):
                     exp_dir=common_params['exp_dir'])
 
     solver.train(train_loader, val_loader)
+    #train_data.close_files()
+    #val_data.close_files()
     final_model_path = os.path.join(common_params['save_model_dir'], train_params['final_model_file'])
     quicknat_model.save(final_model_path)
     print("final model saved @ " + str(final_model_path))
@@ -151,7 +126,8 @@ def evaluate(eval_params, net_params, data_params, common_params, train_params):
     exp_dir = common_params['exp_dir']
     exp_name = train_params['exp_name']
     save_predictions_dir = eval_params['save_predictions_dir']
-    prediction_path = os.path.join(exp_dir, exp_name, save_predictions_dir)
+    #prediction_path = os.path.join(exp_dir, exp_name, save_predictions_dir)
+    prediction_path = os.path.join("E:\\", "CT_VIZ")
     orientation = eval_params['orientation']
 
     quicknat_model = QuickNat(net_params)
@@ -182,7 +158,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', '-m', required=True, help='run mode, valid values are train and eval')
     parser.add_argument('--settings', '-s', required=True, help='which settings file to use, valid values are local and cluster')
+    parser.add_argument('--param_name', '-pm', required=False, help='learning rate for experiment groups', default=None)
+    parser.add_argument('--param_value', '-pv', required=False, help='learning rate for experiment groups', default=None)
     args = parser.parse_args()
+
 
     if args.settings == 'local':
         print("running local config");
@@ -199,6 +178,13 @@ if __name__ == '__main__':
         common_params['log_dir'] = polyaxon_helper.get_outputs_path()
         common_params['save_model_dir'] = polyaxon_helper.get_outputs_path()
         common_params['exp_dir'] = polyaxon_helper.get_outputs_path()
+
+    # override training vaues for experimant groups
+    if args.param_name and args.param_value:
+        print("Before: ", train_params[args.param_name])
+        print("Adjusting experiment to run with learning rate: ", ast.literal_eval(args.param_value))
+        train_params[args.param_name] = ast.literal_eval(args.param_value)
+        print("After: ", train_params[args.param_name])
 
     if args.mode == 'train':
         train(train_params, common_params, data_params, net_params)
