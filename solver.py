@@ -144,10 +144,12 @@ class Solver(object):
                     #    optim.zero_grad()
 #
                     if phase == 'train':
-                        optim.zero_grad()
                         loss.backward()
-                        optim.step()
-                        scheduler.step()
+                        if (idx + 1) % self.train_batch_step_size == 0:
+                            optim.step()
+                            scheduler.step()
+                            optim.zero_grad()
+
 
                     if i_batch % self.log_nth == 0:
                         self.logWriter.loss_per_iter(loss.item(), i_batch, phase, current_iteration)
