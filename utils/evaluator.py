@@ -10,7 +10,6 @@ import utils.data_utils as du
 
 import utils.kits_data_utils as kutils
 import matplotlib.pyplot as plt
-#import visualize as vu
 
 def dice_confusion_matrix(vol_output, ground_truth, num_classes, no_samples=10, mode='train'):
     dice_cm = torch.zeros(num_classes, num_classes)
@@ -30,16 +29,16 @@ def dice_confusion_matrix(vol_output, ground_truth, num_classes, no_samples=10, 
 
 def dice_score_perclass(vol_output, ground_truth, num_classes, no_samples=10, mode='train'):
     dice_perclass = torch.zeros(num_classes)
-    if mode == 'train':
-        samples = np.random.choice(len(vol_output), no_samples)
-        vol_output, ground_truth = vol_output[samples], ground_truth[samples]
-    for i in range(num_classes):
-        GT = (ground_truth == i).float()
-        Pred = (vol_output == i).float()
-        inter = torch.sum(torch.mul(GT, Pred))
-        union = torch.sum(GT) + torch.sum(Pred) + 0.0001
-        dice_perclass[i] = (2 * torch.div(inter, union))
-    return dice_perclass
+    #if mode == 'train':
+    #    samples = np.random.choice(len(vol_output), no_samples)
+    #    vol_output, ground_truth = vol_output[samples], ground_truth[samples]
+    class_label = 1
+    GT = (ground_truth == class_label).float()
+    Pred = (vol_output == class_label).float()
+    inter = torch.sum(GT * Pred)
+    union = torch.sum(GT) + torch.sum(Pred) + 0.0001
+    dice_score_kidney = (2 * torch.div(inter, union))
+    return dice_score_kidney
 
 
 def image_per_epoch(prediction):

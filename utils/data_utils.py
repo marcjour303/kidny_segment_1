@@ -151,9 +151,10 @@ def h5_append_with_handler(data_handle, data_key, data):
     data_handle[data_key][-data.shape[0]:] = data
 
 
-def square_and_resize_volume(volume, targetResolution, nearestNeighbor=False):
-    print('    Resizing from ' + str(volume.shape[0]) + 'x' + str(volume.shape[1]) + 'x' + str(
-        volume.shape[2]) + ' to ' + str(volume.shape[0]) + 'x' + str(targetResolution) + 'x' + str(targetResolution))
+def square_and_resize_volume(volume, targetResolution, nearestNeighbor=False, debug=False):
+    if debug:
+        print('    Resizing from ' + str(volume.shape[0]) + 'x' + str(volume.shape[1]) + 'x' + str(volume.shape[2]) +
+              ' to ' + str(volume.shape[0]) + 'x' + str(targetResolution) + 'x' + str(targetResolution))
 
     if nearestNeighbor:
         volume = resize(volume, (volume.shape[0], targetResolution, targetResolution), mode='constant', cval=0,
@@ -161,7 +162,8 @@ def square_and_resize_volume(volume, targetResolution, nearestNeighbor=False):
     else:
         volume = resize(volume, (volume.shape[0], targetResolution, targetResolution), mode='constant', cval=0,
                         clip=True, preserve_range=True, anti_aliasing=False)
-    print("Done resizing")
+    if debug:
+        print("Done resizing")
     return volume
 
 
@@ -238,12 +240,12 @@ def apply_split(data_skip, train_file, val_file, data_split, data_dir):
     print("Total no of volumes to process : %d" % len(file_paths))
     train_ratio, test_ratio = data_split.split(",")
     train_len = int((int(train_ratio) / 100) * len(file_paths))
-    #train_idx = np.random.choice(len(file_paths), train_len, replace=False)
-    #val_idx = np.array([i for i in range(len(file_paths)) if i not in train_idx])
-    #train_file_paths = [file_paths[i] for i in train_idx]
-    #val_file_paths = [file_paths[i] for i in val_idx]
-    train_file_paths = file_paths[:train_len]
-    val_file_paths = file_paths[train_len:]
+    train_idx = np.random.choice(len(file_paths), train_len, replace=False)
+    val_idx = np.array([i for i in range(len(file_paths)) if i not in train_idx])
+    train_file_paths = [file_paths[i] for i in train_idx]
+    val_file_paths = [file_paths[i] for i in val_idx]
+    #train_file_paths = file_paths[:train_len]
+    #val_file_paths = file_paths[train_len:]
     #train_data['cases'] = np.array(train_file_paths, dtype=int).tolist()
 
     train_data = {}

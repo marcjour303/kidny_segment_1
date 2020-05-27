@@ -9,11 +9,11 @@ tags: [examples]
 environment:
   resources:
     cpu:
-      requests: 3
+      requests: 4
       limits: 8
     memory:
-      requests: 1024
-      limits: 4098
+      requests: 2048
+      limits: 8196
     gpu:
       requests: 1
       limits: 1
@@ -24,7 +24,7 @@ params:
 hptuning:
   matrix:
     param_value:
-      values: [0.00001, 0.0001, 0.001, 0.01, 0.1]
+      values: [1e-10, 1e-8, 1e-6]
 build:
   image: pytorch/pytorch:1.2-cuda10.0-cudnn7-runtime
   build_steps:

@@ -56,23 +56,20 @@ class LogWriter(object):
     def log(self, text, phase='train'):
         self.logger.info(text)
 
-    def loss_per_iter(self, loss_value, i_batch, current_iteration):
+    def loss_per_iter(self, loss_value, i_batch, phase, current_iteration):
         print('[Iteration : ' + str(i_batch) + '] Loss -> ' + str(loss_value))
-        self.writer['train'].add_scalar('loss/per_iteration', loss_value, current_iteration)
+        self.writer[phase].add_scalar('loss/per_iteration', loss_value, current_iteration)
 
     def loss_per_epoch(self, loss_arr, phase, epoch):
-        if phase == 'train':
-            loss = loss_arr[-1]
-        else:
-            loss = np.mean(loss_arr)
+        loss = np.mean(loss_arr)
         self.writer[phase].add_scalar('loss/per_epoch', loss, epoch)
         print('epoch ' + phase + ' loss = ' + str(loss))
 
     def cm_per_epoch(self, phase, output, correct_labels, epoch):
-        print("Confusion Matrix...", end='', flush=True)
+        #print("Confusion Matrix...", end='', flush=True)
         _, cm = eu.dice_confusion_matrix(output, correct_labels, self.num_class, mode='train')
         self.plot_cm('confusion_matrix', phase, cm, epoch)
-        print("DONE", flush=True)
+        #print("DONE", flush=True)
 
     def plot_cm(self, caption, phase, cm, step=None):
         fig = matplotlib.figure.Figure(figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
@@ -104,11 +101,11 @@ class LogWriter(object):
             self.writer[phase].add_figure(caption + '/' + phase, fig)
 
     def dice_score_per_epoch(self, phase, output, correct_labels, epoch):
-        print("Dice Score...", end='', flush=True)
+        #print("Dice Score...", end='', flush=True)
         ds = eu.dice_score_perclass(output, correct_labels, self.num_class)
         self.plot_dice_score(phase, 'dice_score_per_epoch', ds, 'Dice Score', epoch)
         ds_mean = torch.mean(ds)
-        print("DONE", flush=True)
+        #print("DONE", flush=True)
         return ds_mean.item()
 
     def plot_dice_score(self, phase, caption, ds, title, step=None):
@@ -136,21 +133,40 @@ class LogWriter(object):
         ax.xaxis.tick_bottom()
         self.writer['val'].add_figure(caption, fig)
 
-    def image_per_epoch(self, prediction, ground_truth, phase, epoch):
-        print("Sample Images...", end='', flush=True)
+    def image_per_epoch(self, predictions, labels, phase, epoch):
+        #print("Sample Images...", end='', flush=True)
+        ncols = 2
+        nrows = len(predictions)
+        fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 20))
+        for row_idx in range(nrows):
+            prediction = predictions[row_idx]
+            ground_truth = labels[row_idx]
+            ax[row_idx, 0].imshow(prediction.squeeze(), vmax=abs(prediction).max(), vmin=-abs(prediction).max())
+            ax[row_idx, 0].set_title("Predicted", fontsize=10, color="blue")
+            ax[row_idx, 0].axis('off')
+            ax[row_idx, 1].imshow(ground_truth.squeeze(), vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
+            ax[row_idx, 1].set_title("Ground Truth", fontsize=10, color="blue")
+            ax[row_idx, 1].axis('off')
+            fig.set_tight_layout(True)
+
+        self.writer[phase].add_figure('sample_prediction/' + phase, fig, epoch)
+        print('DONE', flush=True)
+
+    def best_model_validation_images(self, prediction, ground_truth):
+        print("Best model validation images...", end='', flush=True)
         ncols = 2
         nrows = 1
         fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 20))
 
-        ax[0].imshow(prediction, vmax=abs(prediction).max(), vmin=-abs(prediction).max())
+        ax[0].imshow(prediction.squeeze(), vmax=abs(prediction).max(), vmin=-abs(prediction).max())
         ax[0].set_title("Predicted", fontsize=10, color="blue")
         ax[0].axis('off')
-        ax[1].imshow(ground_truth, vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
+        ax[1].imshow(ground_truth.squeeze(), vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
         ax[1].set_title("Ground Truth", fontsize=10, color="blue")
         ax[1].axis('off')
         fig.set_tight_layout(True)
 
-        self.writer[phase].add_figure('sample_prediction/' + phase, fig, epoch)
+        self.writer['val'].add_figure('sample_best_model_val_prediction/' + 'val_success', fig)
         print('DONE', flush=True)
 
     def graph(self, model, X):

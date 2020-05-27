@@ -11,7 +11,7 @@ from solver import Solver
 
 #utility imports
 import utils.data_utils as du
-from utils.data_loader import DataloaderNII, ToTensor, NiftiData
+from utils.data_loader import ToTensor, NiftiData
 from utils.log_utils import LogWriter
 import shutil
 import ast
@@ -36,48 +36,16 @@ transform_val = transforms.Compose([
 def train(train_params, common_params, data_params, net_params):
     train_files, val_files = du.apply_split(data_params["data_skip"], data_params["train_data_file"], data_params["val_data_file"],
                                             data_params["data_split"], data_params["data_dir"])
-
-    train_ratio, test_ratio = data_params["data_split"].split(",")
-    tt_ratio = float(test_ratio) / float(train_ratio)
-    train_files = train_files[:10]
-    h5_nr = 10
-    iter_number = len(train_files) // h5_nr
-    idx = 0
-    idx_val = 0
-
-    if False:
-        for i in range(iter_number):
-            c_t_d = train_files[idx:(idx + h5_nr)]
-            c_v_d = val_files[idx_val:int((idx_val + h5_nr) * tt_ratio)]
-            idx = idx + h5_nr
-            idx_val = idx_val + int((idx_val + h5_nr) * tt_ratio)
-            print("idx: " , idx)
-            print("idx_val: ", idx_val)
-            train_data = DataloaderNII(c_t_d, data_params, 'train', transform_train)
-            val_data = DataloaderNII(c_v_d, data_params, 'val', transform_val)
-
-            train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
-            use_pre_trained = True
-
-        if len(train_files)% h5_nr != 0:
-            c_t_d = train_files[idx:]
-            c_v_d = val_files[idx_val:]
-
-            train_data = DataloaderNII(c_t_d, data_params, 'train', transform_train)
-            val_data = DataloaderNII(c_v_d, data_params, 'val', transform_val)
-
-            train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
-    else:
-        train_data = NiftiData(train_files[:1], data_params, train=True)
-        val_data = NiftiData(val_files[:1], data_params, train=False)
-        train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
+    train_data = NiftiData(train_files[:50], data_params, train=True)
+    val_data = NiftiData(val_files[:10], data_params, train=False)
+    train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
 
 
 def train_stage(train_data, val_data, train_params, common_params, data_params, net_params):
 
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=train_params['train_batch_size'], shuffle=True,
                                                num_workers=4, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['val_batch_size'], shuffle=False,
+    val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['val_batch_size'], shuffle=True,
                                              num_workers=4, pin_memory=True)
 
     if train_params['use_pre_trained']:
@@ -102,14 +70,21 @@ def train_stage(train_data, val_data, train_params, common_params, data_params, 
                     lr_scheduler_gamma=train_params['lr_scheduler_gamma'],
                     use_last_checkpoint=train_params['use_last_checkpoint'],
                     log_dir=common_params['log_dir'],
-                    exp_dir=common_params['exp_dir'])
+                    exp_dir=common_params['exp_dir'],
+                    train_batch_step_size=train_params['train_batch_step_size'],
+                    val_batch_step_size=train_params['val_batch_step_size'])
 
     solver.train(train_loader, val_loader)
     #train_data.close_files()
     #val_data.close_files()
+
     final_model_path = os.path.join(common_params['save_model_dir'], train_params['final_model_file'])
     quicknat_model.save(final_model_path)
+
+    #final_model_path = os.path.join(common_params['save_model_dir'], train_params['final_model_file'])
+    #solver.save_best_model(final_model_path)
     print("final model saved @ " + str(final_model_path))
+    solver.log_best_model_results(val_loader)
 
 
 def evaluate(eval_params, net_params, data_params, common_params, train_params):
@@ -185,7 +160,15 @@ if __name__ == '__main__':
         print("Adjusting experiment to run with learning rate: ", ast.literal_eval(args.param_value))
         train_params[args.param_name] = ast.literal_eval(args.param_value)
         print("After: ", train_params[args.param_name])
-
+    print("Running with configuration:")
+    print("COMMON_PARAMS")
+    print(common_params)
+    print("NET_PARAMS")
+    print(net_params)
+    print("DATA_PARAMS")
+    print(data_params)
+    print("TRAIN_PARAMS")
+    print(train_params)
     if args.mode == 'train':
         train(train_params, common_params, data_params, net_params)
     elif args.mode == 'eval':

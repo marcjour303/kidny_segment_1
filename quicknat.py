@@ -17,18 +17,13 @@ def visualize_layer(layer, phase):
     out_path = Path(os.path.join("E:\\", "label_vis_data_utils", phase))
     if not out_path.exists():
         out_path.mkdir()
-    #fig_count = 5
     if vis_count == 1 or vis_count == 10:
-        #index = np.random.choice(layer1.shape[0], fig_count, replace=False)
         fig, ax = plt.subplots(layer1.shape[0]//10+1, 10)
         for i in range(layer1.shape[0]):
             idx = i // 10
             idy = i % 10
-            #print(idx, idy)
             _ = ax[idx, idy].imshow(layer1[i])
             fig_path = os.path.join(out_path, "_img_" + str(vis_count) + "_" + str(phase) + '.jpeg')
-            #print(str(fig_path))
-
         fig.savefig(str(fig_path))
 
 
@@ -67,6 +62,7 @@ class QuickNat(nn.Module):
         self.decode4 = sm.DecoderBlock(params, se_block_type=se.SELayer.CSSE)
         params['num_channels'] = 64
         self.classifier = sm.ClassifierBlock(params)
+        self.sigmoid = nn.Sigmoid()
 
 
     def forward(self, input):
@@ -77,28 +73,17 @@ class QuickNat(nn.Module):
         """
 
         e1, out1, ind1 = self.encode1.forward(input)
-        #global vis_count
-        #vis_count = vis_count + 1
-        #visualize_layer(e1, "encoder1")
-        #visualize_layer(out1, "encoder1_out1")
+
         e2, out2, ind2 = self.encode2.forward(e1)
-        #visualize_layer(e2, "encoder2")
         e3, out3, ind3 = self.encode3.forward(e2)
-        #visualize_layer(e3, "encoder3")
         e4, out4, ind4 = self.encode4.forward(e3)
-        #visualize_layer(e4, "encoder4")
         bn = self.bottleneck.forward(e4)
-
         d4 = self.decode3.forward(bn, out4, ind4)
-        #visualize_layer(d4, "decode1")
         d3 = self.decode1.forward(d4, out3, ind3)
-        #visualize_layer(d3, "decode2")
         d2 = self.decode2.forward(d3, out2, ind2)
-        #visualize_layer(d2, "decode3")
         d1 = self.decode3.forward(d2, out1, ind1)
-        #visualize_layer(d1, "decode4")
-        prob = self.classifier.forward(d1)
-
+        out = self.classifier.forward(d1)
+        prob = self.sigmoid(out)
         return prob
 
     def enable_test_dropout(self):
@@ -138,7 +123,6 @@ class QuickNat(nn.Module):
         - X: Volume to be predicted
         """
         self.eval()
-        #print("tensor size before transformation", X.shape)
 
         if type(X) is np.ndarray:
             X = torch.tensor(X, requires_grad=False).type(torch.FloatTensor).cuda(device, non_blocking=True)
@@ -148,7 +132,6 @@ class QuickNat(nn.Module):
             X = X.type(torch.FloatTensor).cuda(device, non_blocking=True)
             #X = X.type(torch.FloatTensor)
 
-        #print("tensor size ", X.shape)
 
         if enable_dropout:
             self.enable_test_dropout()
@@ -156,10 +139,9 @@ class QuickNat(nn.Module):
         with torch.no_grad():
             out = self.forward(X)
 
-        max_val, idx = torch.max(out, 1)
-        idx = idx.data.cpu().numpy()
-
+        idx = out > 0.5
+        idx = idx.data.cpu().numpy().astype(int)
         prediction = np.squeeze(idx)
-        #print("perdiction shape", prediction.shape)
-        del X, out, idx, max_val
+
+        del X, out, idx
         return prediction

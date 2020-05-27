@@ -40,7 +40,9 @@ class Solver(object):
                  lr_scheduler_gamma=0.5,
                  use_last_checkpoint=True,
                  exp_dir='experiments',
-                 log_dir='logs'):
+                 log_dir='logs',
+                 train_batch_step_size=8,
+                 val_batch_step_size=8):
 
         self.device = device
         self.model = model
@@ -58,6 +60,7 @@ class Solver(object):
         self.scheduler = lr_scheduler.StepLR(self.optim, step_size=lr_scheduler_step_size,
                                              gamma=lr_scheduler_gamma)
 
+        #self.scheduler = lr_scheduler.ReduceLROnPlateau(self.optim, patience=2, mode='min')
         exp_dir_path = os.path.join(exp_dir, exp_name)
         common_utils.create_if_not(exp_dir_path)
         common_utils.create_if_not(os.path.join(exp_dir_path, CHECKPOINT_DIR))
@@ -74,6 +77,9 @@ class Solver(object):
 
         self.best_ds_mean = 0
         self.best_ds_mean_epoch = 0
+
+        self.val_batch_step_size = val_batch_step_size
+        self.train_batch_step_size = train_batch_step_size
 
         if use_last_checkpoint:
             self.load_checkpoint()
@@ -114,68 +120,62 @@ class Solver(object):
                 else:
                     model.eval()
 
-                for i_batch, sample_batched in enumerate(dataloaders[phase]):
+                for idx, (i_batch, sample_batched) in enumerate(dataloaders[phase]):
 
                     X = sample_batched[0].type(torch.FloatTensor)
                     y = sample_batched[1].type(torch.LongTensor)
-                    w = sample_batched[2].type(torch.FloatTensor)
+                    class_w = sample_batched[2].type(torch.FloatTensor)
+                    w = sample_batched[3].type(torch.FloatTensor)
 
                     if model.is_cuda:
-                        X, y, w = X.cuda(self.device, non_blocking=True), \
-                                  y.cuda(self.device, non_blocking=True), \
-                                  w.cuda(self.device, non_blocking=True)
+                        X, y, class_w, w = X.cuda(self.device, non_blocking=True), \
+                                           y.cuda(self.device, non_blocking=True), \
+                                           class_w.cuda(self.device, non_blocking=True), \
+                                           w.cuda(self.device, non_blocking=True)
 
                     output = model(X)
 
-                    #loss = self.loss_func(output, y, binary=True)
-                    loss  = self.loss_func(output, y, w)
+                    debug_print = i_batch % 50 == 0
+                    loss = self.loss_func(output, y,  class_w, w, print_separate=debug_print)
+
+                    #if (idx + 1) % self.train_batch_step_size == 0:
+                    #    # every 10 iterations of batches of size 10
+                    #    optim.step()
+                    #    optim.zero_grad()
+#
                     if phase == 'train':
                         optim.zero_grad()
                         loss.backward()
                         optim.step()
                         scheduler.step()
-                        if i_batch % self.log_nth == 0:
-                            self.logWriter.loss_per_iter(loss.item(), i_batch, current_iteration)
-                        current_iteration += 1
+
+                    if i_batch % self.log_nth == 0:
+                        self.logWriter.loss_per_iter(loss.item(), i_batch, phase, current_iteration)
+                    current_iteration += 1
 
                     loss_arr.append(loss.item())
 
-                    _, batch_output = torch.max(output, dim=1)
+                    batch_output = output > 0.5
                     out_list.append(batch_output.cpu())
                     y_list.append(y.cpu())
 
-                    del X, y, w, output, batch_output, loss
+                    del X, y, class_w, w, output, batch_output, loss
                     torch.cuda.empty_cache()
-                    if phase == 'val':
-                        if i_batch != len(dataloaders[phase]) - 1:
-                            print("#", end='', flush=True)
-                        else:
-                            print("100%", flush=True)
-
-                #out_path = Path(os.path.join("E:\\", "label_vis_data_utils", "predictions", phase))
-                #if not out_path.exists():
-                #    out_path.mkdir()
 
                 with torch.no_grad():
                     out_arr, y_arr = torch.cat(out_list), torch.cat(y_list)
                     self.logWriter.loss_per_epoch(loss_arr, phase, epoch)
                     data_len = len(dataloaders[phase].dataset)
-                    index = np.random.choice(data_len, 5, replace=False)
+                    epoch_image_count = 5
+                    index = np.random.choice(data_len, epoch_image_count, replace=False)
+                    predictions = []
+                    labels = []
                     for idx in index:
-                        #print("Logging image with index: ", idx)
-                        v_img, v_label, w, _ = dataloaders[phase].dataset[idx]
-                        name_val = random.randint(1, 100)
-                        self.logWriter.image_per_epoch(model.predict(v_img.unsqueeze(dim=0), self.device), v_label, phase, epoch)
-                        prediction = model.predict(v_img.unsqueeze(dim=0), self.device)
-                        #fig, ax = plt.subplots(1, 4)
-                        #_ = ax[0].imshow(v_label, cmap='Greys', vmax=abs(v_label).max(), vmin=abs(v_label).min())
-                        #_ = ax[1].imshow(v_img.squeeze())
-                        #_ = ax[2].imshow(w)
-                        #_ = ax[3].imshow(prediction)
-                        #fig_path = os.path.join(out_path, str(epoch) + "_" + "_img_" + str(name_val) + "_" + str(phase) + '.jpeg')
-                        #print(str(fig_path))
-                        #fig.savefig(str(fig_path))
+                        v_img, v_label, class_w, _ = dataloaders[phase].dataset[idx]
+                        predictions.append(model.predict(v_img.unsqueeze(dim=0), self.device))
+                        labels.append(v_label)
 
+                    self.logWriter.image_per_epoch(predictions, labels, phase, epoch)
                     self.logWriter.cm_per_epoch(phase, out_arr, y_arr, epoch)
                     ds_mean = self.logWriter.dice_score_per_epoch(phase, out_arr, y_arr, epoch)
                     print("Dice score per epoch: ", ds_mean)
@@ -196,7 +196,9 @@ class Solver(object):
                             'checkpoint_epoch_' + str(epoch) + '.' + CHECKPOINT_EXTENSION))
 
         print('FINISH.')
+
         self.logWriter.close()
+
 
     def save_best_model(self, path):
         """
@@ -211,7 +213,7 @@ class Solver(object):
         torch.save(self.model, path)
 
     def save_checkpoint(self, state, filename):
-        print('saving mooodel:', filename)
+        print('saving model:', filename)
         torch.save(state, filename)
 
     def load_checkpoint(self, epoch=None):
@@ -244,3 +246,19 @@ class Solver(object):
 
         self.scheduler.load_state_dict(checkpoint['scheduler'])
         self.logWriter.log("=> loaded checkpoint '{}' (epoch {})".format(file_path, checkpoint['epoch']))
+
+    def log_best_model_results(self, val_data):
+
+        self.load_checkpoint(self.best_ds_mean_epoch)
+        self.model.eval()
+        index = np.random.choice(len(val_data), 5, replace=False)
+        for idx in index:
+            # print("Logging image with index: ", idx)
+            v_img, v_label, _, _ = val_data.dataset[idx]
+            prediction = self.model.predict(v_img.unsqueeze(dim=0), self.device)
+            torch.cuda.empty_cache()
+            self.logWriter.best_model_validation_images(prediction, v_label)
+
+        print('FINISH.')
+
+        self.logWriter.close()

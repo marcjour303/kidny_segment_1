@@ -20,6 +20,11 @@ from torch.nn.modules.loss import _Loss, _WeightedLoss
 import numpy as np
 from torch.autograd import Variable
 
+from pathlib import Path
+import matplotlib.pyplot as plt
+import os
+import random
+
 
 class DiceLoss(_WeightedLoss):
     """
@@ -37,13 +42,13 @@ class DiceLoss(_WeightedLoss):
         :param binary: bool for binarized one chaneel(C=1) input
         :return: torch.tensor
         """
-        output = F.softmax(output, dim=1)
+        #output = F.softmax(output, dim=1)
         if binary:
-            return self._dice_loss_binary(output, target)
+            return self._dice_loss_binary(output, target, weights)
         return self._dice_loss_multichannel(output, target, weights, ignore_index)
 
     @staticmethod
-    def _dice_loss_binary(output, target):
+    def _dice_loss_binary(output, target, weights=None):
         """
         Dice loss for one channel binarized input
 
@@ -51,16 +56,49 @@ class DiceLoss(_WeightedLoss):
         :param target: NxHxW LongTensor
         :return:
         """
-        eps = 0.0001
 
+        eps = 0.0001
+        smooth = 1.
+        target = target.float()
         intersection = output * target
-        numerator = 2 * intersection.sum(0).sum(1).sum(1)
+        numerator = 2 * (intersection.sum() + smooth)
         denominator = output + target
-        denominator = denominator.sum(0).sum(1).sum(1) + eps
-        #print("Val: ", (numerator / denominator))
+        denominator = denominator.sum() + eps + smooth
         loss_per_channel = 1 - (numerator / denominator)
 
-        return loss_per_channel.sum() / output.size(1)
+        return loss_per_channel
+
+
+        #eps = 0.0001
+        #if weights is None:
+        #    weights = 1
+        #target_f = target.float()
+        #intersection = output * target_f
+        #union = (output + target_f)
+
+        #print_separate = random.random() > 0.6
+        #if print_separate:
+        #    out_path = Path(os.path.join("E:\\", "label_vis_data_utils", "predictions", "dice_data"))
+        #    if not out_path.exists():
+        #        out_path.mkdir()
+        #    fig, ax = plt.subplots(1, 4)
+        #    t1 = output.detach().cpu().numpy().squeeze()
+        #    t2 = target.detach().cpu().numpy().squeeze()
+        #    t3 = intersection.detach().cpu().numpy().squeeze()
+        #    t4 = union.detach().cpu().numpy().squeeze()
+        #    _ = ax[0].imshow(t1, vmax=abs(t1).max(), vmin=abs(t1).min(), cmap='Greys')
+        #    _ = ax[1].imshow(t2, vmax=abs(t2).max(), vmin=abs(t2).min(), cmap='Greys')
+        #    _ = ax[2].imshow(t3, vmax=abs(t3).max(), vmin=abs(t3).min(), cmap='Greys')
+        #    _ = ax[3].imshow(t4, vmax=abs(t4).max(), vmin=abs(t4).min(), cmap='Greys')
+        #    fig_path = os.path.join(out_path, "_" + str(random.random()) + "_img_" +'.jpeg')
+        #    fig.savefig(str(fig_path))
+
+        #smooth = 1
+
+        #nom = 2 * (intersection.sum() + smooth)
+        #denom = union.sum() + smooth
+        #loss_val = 1 - (nom / denom)
+        #return loss_val
 
     @staticmethod
     def _dice_loss_multichannel(output, target, weights=None, ignore_index=None):
@@ -76,7 +114,7 @@ class DiceLoss(_WeightedLoss):
         """
         eps = 0.0001
         encoded_target = output.detach() * 0
-
+        target = target.squeeze()
         if ignore_index is not None:
             mask = target == ignore_index
             target = target.clone()
@@ -159,7 +197,7 @@ class CrossEntropyLoss2d(_WeightedLoss):
 
     def __init__(self, weight_mfb=None):
         super(CrossEntropyLoss2d, self).__init__()
-        self.nll_loss = nn.CrossEntropyLoss(weight_mfb)
+        self.nll_loss = nn.CrossEntropyLoss(weight_mfb, reduction='none')
 
     def forward(self, inputs, targets):
         """
@@ -177,14 +215,12 @@ class CombinedLoss(_Loss):
     A combination of dice and cross entropy loss
     """
 
-    def __init__(self, weight_mfb=None):
+    def __init__(self, weight_mfb=None, pos_weight=None):
         super(CombinedLoss, self).__init__()
-        self.cross_entropy_loss = CrossEntropyLoss2d(weight_mfb)
         self.dice_loss = DiceLoss()
-        self.focal_loss = FocalLoss()
-        self.l2_loss = nn.MSELoss()
+        self.bce_loss = nn.BCEWithLogitsLoss(weight=weight_mfb, pos_weight=pos_weight)
 
-    def forward(self, input, target, class_weight=None, weight=None):
+    def forward(self, input, target, class_weight=None, weight=None, print_separate=False):
         """
         Forward pass
 
@@ -193,18 +229,19 @@ class CombinedLoss(_Loss):
         :param weight: torch.tensor (NxHxW)
         :return: scalar
         """
-        input_soft = F.softmax(input, dim=1)
-        y_2 = torch.mean(self.dice_loss(input_soft, target))
+        #print(input.shape)
+        y_1 = self.dice_loss(input, target, binary=True)
+        y_2 = 0
         if class_weight is None:
-            y_1 = torch.mean(self.cross_entropy_loss.forward(input, target))
+            y_2 = torch.mean(self.bce_loss.forward(input, target))
         else:
-            y_0 = self.cross_entropy_loss.forward(input, target)
-            y_1 = torch.mean(torch.mul(y_0, class_weight.cuda()))
-            if weight is None:
-                return y_1 + y_2
-            y_3 = torch.mul(y_1, weight)
-            y_3 = y_3.sum() / weight.sum()
-        return y_3 + y_2
+            y_2 = F.binary_cross_entropy(input, target.float(), weight=class_weight.cuda(), reduction='mean')
+
+            #if print_separate:
+            #    print("Dice score: ", y_1)
+            #    print("CE score: ", y_2)
+
+        return y_1 + y_2
 
 
 # Credit to https://github.com/clcarwin/focal_loss_pytorch

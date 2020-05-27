@@ -15,3 +15,4 @@ var
 *.nii
 *.npy
 checkpoint*
+CT_quicknat_finetuned_1.pth.tar
