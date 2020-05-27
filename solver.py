@@ -138,11 +138,6 @@ class Solver(object):
                     debug_print = i_batch % 50 == 0
                     loss = self.loss_func(output, y,  class_w, w, print_separate=debug_print)
 
-                    #if (idx + 1) % self.train_batch_step_size == 0:
-                    #    # every 10 iterations of batches of size 10
-                    #    optim.step()
-                    #    optim.zero_grad()
-#
                     if phase == 'train':
                         loss.backward()
                         if (idx + 1) % self.train_batch_step_size == 0:
