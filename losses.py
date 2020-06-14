@@ -17,13 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss, _WeightedLoss
-import numpy as np
 from torch.autograd import Variable
-
-from pathlib import Path
-import matplotlib.pyplot as plt
-import os
-import random
 
 
 class DiceLoss(_WeightedLoss):
@@ -220,7 +214,7 @@ class CombinedLoss(_Loss):
         self.dice_loss = DiceLoss()
         self.bce_loss = nn.BCEWithLogitsLoss(weight=weight_mfb, pos_weight=pos_weight)
 
-    def forward(self, input, target, class_weight=None, weight=None, print_separate=False):
+    def forward(self, input, target, class_weight=None):
         """
         Forward pass
 
@@ -229,20 +223,22 @@ class CombinedLoss(_Loss):
         :param weight: torch.tensor (NxHxW)
         :return: scalar
         """
-        #print(input.shape)
+
         y_1 = self.dice_loss(input, target, binary=True)
-        y_2 = 0
-        if class_weight is None:
-            y_2 = torch.mean(self.bce_loss.forward(input, target))
-        else:
-            y_2 = F.binary_cross_entropy(input, target.float(), weight=class_weight.cuda(), reduction='mean')
+        y_2 = F.binary_cross_entropy(input, target.float(), reduction='none')
+        y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
+        alpha = 1
+        beta = 1
+        return alpha*y_1 + beta*y_2
 
-            #if print_separate:
-            #    print("Dice score: ", y_1)
-            #    print("CE score: ", y_2)
 
-        return y_1 + y_2
 
+def log_losses(input, target, class_weight=None):
+    dice_loss = DiceLoss()
+    y_1 = dice_loss(input, target, binary=True)
+    y_2 = F.binary_cross_entropy(input, target.float(), reduction='none')
+    y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
+    return y_1, y_2
 
 # Credit to https://github.com/clcarwin/focal_loss_pytorch
 class FocalLoss(nn.Module):

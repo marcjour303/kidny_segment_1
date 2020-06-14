@@ -27,11 +27,7 @@ def dice_confusion_matrix(vol_output, ground_truth, num_classes, no_samples=10, 
     return avg_dice, dice_cm
 
 
-def dice_score_perclass(vol_output, ground_truth, num_classes, no_samples=10, mode='train'):
-    dice_perclass = torch.zeros(num_classes)
-    #if mode == 'train':
-    #    samples = np.random.choice(len(vol_output), no_samples)
-    #    vol_output, ground_truth = vol_output[samples], ground_truth[samples]
+def dice_score_perclass(vol_output, ground_truth):
     class_label = 1
     GT = (ground_truth == class_label).float()
     Pred = (vol_output == class_label).float()

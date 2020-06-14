@@ -56,9 +56,12 @@ class LogWriter(object):
     def log(self, text, phase='train'):
         self.logger.info(text)
 
-    def loss_per_iter(self, loss_value, i_batch, phase, current_iteration):
-        print('[Iteration : ' + str(i_batch) + '] Loss -> ' + str(loss_value))
-        self.writer[phase].add_scalar('loss/per_iteration', loss_value, current_iteration)
+    def loss_per_iter(self, acc_loss_val, dice_loss_value, ce_loss_value,  i_batch, phase, current_iteration):
+        print('[Iteration : ' + str(i_batch) + '] CE Loss -> ' + str(ce_loss_value))
+        print('[Iteration : ' + str(i_batch) + '] Dice Loss -> ' + str(dice_loss_value))
+        self.writer[phase].add_scalar('acc_loss/per_iteration', acc_loss_val, current_iteration)
+        self.writer[phase].add_scalar('dice_loss/per_iteration', dice_loss_value, current_iteration)
+        self.writer[phase].add_scalar('ce_loss/per_iteration', ce_loss_value, current_iteration)
 
     def loss_per_epoch(self, loss_arr, phase, epoch):
         loss = np.mean(loss_arr)
@@ -66,10 +69,8 @@ class LogWriter(object):
         print('epoch ' + phase + ' loss = ' + str(loss))
 
     def cm_per_epoch(self, phase, output, correct_labels, epoch):
-        #print("Confusion Matrix...", end='', flush=True)
         _, cm = eu.dice_confusion_matrix(output, correct_labels, self.num_class, mode='train')
         self.plot_cm('confusion_matrix', phase, cm, epoch)
-        #print("DONE", flush=True)
 
     def plot_cm(self, caption, phase, cm, step=None):
         fig = matplotlib.figure.Figure(figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
@@ -101,12 +102,10 @@ class LogWriter(object):
             self.writer[phase].add_figure(caption + '/' + phase, fig)
 
     def dice_score_per_epoch(self, phase, output, correct_labels, epoch):
-        #print("Dice Score...", end='', flush=True)
-        ds = eu.dice_score_perclass(output, correct_labels, self.num_class)
-        self.plot_dice_score(phase, 'dice_score_per_epoch', ds, 'Dice Score', epoch)
-        ds_mean = torch.mean(ds)
-        #print("DONE", flush=True)
-        return ds_mean.item()
+        ds = eu.dice_score_perclass(output, correct_labels)
+        #self.plot_dice_score(phase, 'dice_score_per_epoch', ds, 'Dice Score', epoch)
+        self.writer[phase].add_scalar('dice_score_per_epoch', ds, epoch)
+        return ds.item()
 
     def plot_dice_score(self, phase, caption, ds, title, step=None):
         fig = matplotlib.figure.Figure(figsize=(8, 6), dpi=180, facecolor='w', edgecolor='k')
@@ -134,7 +133,6 @@ class LogWriter(object):
         self.writer['val'].add_figure(caption, fig)
 
     def image_per_epoch(self, predictions, labels, phase, epoch):
-        #print("Sample Images...", end='', flush=True)
         ncols = 2
         nrows = len(predictions)
         fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 20))

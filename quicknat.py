@@ -126,11 +126,9 @@ class QuickNat(nn.Module):
 
         if type(X) is np.ndarray:
             X = torch.tensor(X, requires_grad=False).type(torch.FloatTensor).cuda(device, non_blocking=True)
-            #X = torch.tensor(X, requires_grad=False).type(torch.FloatTensor)
-            #X = torch.unsqueeze(X, 0)
         elif type(X) is torch.Tensor and not X.is_cuda:
             X = X.type(torch.FloatTensor).cuda(device, non_blocking=True)
-            #X = X.type(torch.FloatTensor)
+
 
 
         if enable_dropout:

@@ -36,16 +36,16 @@ transform_val = transforms.Compose([
 def train(train_params, common_params, data_params, net_params):
     train_files, val_files = du.apply_split(data_params["data_skip"], data_params["train_data_file"], data_params["val_data_file"],
                                             data_params["data_split"], data_params["data_dir"])
-    train_data = NiftiData(train_files[:50], data_params, train=True)
-    val_data = NiftiData(val_files[:10], data_params, train=False)
+    train_data = NiftiData(train_files[:train_params['input_train_volumes']], data_params, train=True)
+    val_data = NiftiData(val_files[:train_params['input_val_volumes']], data_params, train=False)
     train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
 
 
 def train_stage(train_data, val_data, train_params, common_params, data_params, net_params):
 
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=train_params['train_batch_size'], shuffle=True,
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=train_params['train_batch_step_size'], shuffle=True,
                                                num_workers=4, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['val_batch_size'], shuffle=True,
+    val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['val_batch_step_size'], shuffle=True,
                                              num_workers=4, pin_memory=True)
 
     if train_params['use_pre_trained']:
@@ -71,8 +71,8 @@ def train_stage(train_data, val_data, train_params, common_params, data_params, 
                     use_last_checkpoint=train_params['use_last_checkpoint'],
                     log_dir=common_params['log_dir'],
                     exp_dir=common_params['exp_dir'],
-                    train_batch_step_size=train_params['train_batch_step_size'],
-                    val_batch_step_size=train_params['val_batch_step_size'])
+                    train_batch_size=train_params['train_batch_size'],
+                    val_batch_size=train_params['val_batch_size'])
 
     solver.train(train_loader, val_loader)
     #train_data.close_files()
