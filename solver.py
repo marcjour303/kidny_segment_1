@@ -9,7 +9,7 @@ from torch.optim import lr_scheduler
 
 import utils.common_utils as common_utils
 from utils.log_utils import LogWriter
-
+import utils.evaluator as eu
 import matplotlib.pyplot as plt
 from pathlib import Path
 import random
@@ -95,10 +95,6 @@ class Solver(object):
         - val_loader: val data in torch.utils.data.DataLoader
         """
         model, optim, scheduler = self.model, self.optim, self.scheduler
-        dataloaders = {
-            'train': train_loader,
-            'val': val_loader
-        }
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -106,18 +102,23 @@ class Solver(object):
 
         print('START TRAINING. : model name = %s, device = %s' % (
             self.model_name, torch.cuda.get_device_name(self.device)))
-        current_iteration = self.start_iteration
-
+        train_iteration = self.start_iteration
+        val_iteration = self.start_iteration
         for epoch in range(self.start_epoch, self.num_epochs + 1):
             print("\n==== Epoch [ %d  /  %d ] START ====" % (epoch, self.num_epochs))
 
-            self.train_batch(dataloaders['train'], epoch)
-            self.val_batch(dataloaders['train'], epoch)
+            self.model.train()
+            phase = 'train'
+            train_iteration = self.train_batch(train_loader, epoch, phase, train_iteration)
+            with torch.no_grad():
+                self.model.eval()
+                phase = 'val'
+                val_iteration = self.train_batch(val_loader, epoch, phase, val_iteration)
 
             print("==== Epoch [" + str(epoch) + " / " + str(self.num_epochs) + "] DONE ====")
             self.save_checkpoint({
                 'epoch': epoch + 1,
-                'start_iteration': current_iteration + 1,
+                'start_iteration': train_iteration + 1,
                 'arch': self.model_name,
                 'state_dict': model.state_dict(),
                 'optimizer': optim.state_dict(),
@@ -129,16 +130,13 @@ class Solver(object):
 
         self.logWriter.close()
 
-    def train_batch(self, data_loader, epoch):
-        model = self.model
-        model.train()
-        phase = 'train'
+    def train_batch(self, data_loader, epoch, phase, iteration):
+
         loss_arr = []
-        out_list = []
-        y_list = []
+
         print("<<<= Phase: %s =>>>" % phase)
         for i_batch, sample_batched in enumerate(data_loader):
-
+            model = self.model
             X = sample_batched[0].type(torch.FloatTensor)
             y = sample_batched[1].type(torch.LongTensor)
             class_w = sample_batched[2].type(torch.FloatTensor)
@@ -154,84 +152,82 @@ class Solver(object):
             with torch.no_grad():
                 dice, ce = additional_losses.log_losses(output.detach(), y.detach(), class_w.detach())
 
-            loss.backward()
-            if (i_batch + 1) % self.train_batch_size == 0:
-                self.optim.step()
-                self.scheduler.step()
-                self.optim.zero_grad()
             if i_batch % self.log_nth == 0:
-                self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, 'train', i_batch)
-
+                self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
 
             loss_arr.append(loss.item())
 
-            batch_output = output > 0.5
-            out_list.append(batch_output.cpu())
-            y_list.append(y.cpu())
+            if phase == 'train':
+                loss.backward()
+                if (i_batch + 1) % self.train_batch_size == 0:
+                    self.optim.step()
+                    self.scheduler.step()
+                    self.optim.zero_grad()
 
-            del X, y, class_w, output, batch_output, loss
+            del X, y, class_w, output, loss
+            del model
             torch.cuda.empty_cache()
-        _ = self.log_results(data_loader, loss_arr, out_list, y_list, phase, epoch)
+            iteration += 1
+        self.log_results(data_loader, loss_arr, phase, epoch)
+        return iteration
 
-    def val_batch(self, data_loader, epoch):
-        model = self.model
-        model.eval()
+    def val_batch(self, data_loader, epoch, iteration):
+        self.model.eval()
         phase = 'val'
         loss_arr = []
-        out_list = []
-        y_list = []
         print("<<<= Phase: %s =>>>" % phase)
+
+        for i_batch, sample_batched in enumerate(data_loader):
+            model = self.model
+            X = sample_batched[0].type(torch.FloatTensor)
+            y = sample_batched[1].type(torch.LongTensor)
+            class_w = sample_batched[2].type(torch.FloatTensor)
+            if model.is_cuda:
+                X, y, class_w = X.cuda(self.device, non_blocking=True), \
+                                   y.cuda(self.device, non_blocking=True), \
+                                   class_w.cuda(self.device, non_blocking=True)
+            output = model(X)
+            loss = self.loss_func(output, y, class_weight=class_w)
+            loss_arr.append(loss.item())
+
+            dice, ce = additional_losses.log_losses(output.detach(), y.detach(), class_w.detach())
+            if i_batch % self.log_nth == 0:
+                self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
+
+            del X, y, class_w, output, loss
+            del model
+            torch.cuda.empty_cache()
+            iteration += 1
+
+        self.log_results(data_loader, loss_arr, phase, epoch)
+        return iteration
+
+    def log_results(self, data_loader, loss_arr, phase, epoch):
+        print("Computing model accuracy ")
         with torch.no_grad():
+            ds = 0
+            batch_count = 0
+            self.logWriter.loss_per_epoch(loss_arr, phase, epoch)
             for i_batch, sample_batched in enumerate(data_loader):
+                x_in = sample_batched[0].type(torch.FloatTensor)
+                labels = sample_batched[1].type(torch.LongTensor).squeeze()
+                if self.model.is_cuda:
+                    x_in, labels = x_in.cuda(self.device, non_blocking=True),\
+                                   labels.cuda(self.device, non_blocking=True)
 
-                X = sample_batched[0].type(torch.FloatTensor)
-                y = sample_batched[1].type(torch.LongTensor)
-                class_w = sample_batched[2].type(torch.FloatTensor)
+                pred = self.model.predict(x_in, self.device)
+                ds += eu.dice_score_perclass(pred, labels)
+                batch_count += 1
+                print(".", end="", flush=True)
 
-                if model.is_cuda:
-                    X, y, class_w = X.cuda(self.device, non_blocking=True), \
-                                       y.cuda(self.device, non_blocking=True), \
-                                       class_w.cuda(self.device, non_blocking=True)
-
-                output = model(X)
-                loss = self.loss_func(output, y, class_weight=class_w)
-                dice, ce = additional_losses.log_losses(output.detach(), y.detach(), class_w.detach())
-
-                if i_batch % self.log_nth == 0:
-                    self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, 'val', i_batch)
-
-                loss_arr.append(loss.item())
-
-                batch_output = output > 0.5
-                out_list.append(batch_output.cpu())
-                y_list.append(y.cpu())
-
-                del X, y, class_w, output, batch_output, loss
-                torch.cuda.empty_cache()
-        ds = self.log_results(data_loader, loss_arr, out_list, y_list, phase, epoch)
-        if ds > self.best_ds_mean:
-            self.best_ds_mean = ds
-            self.best_ds_mean_epoch = epoch
-
-    def log_results(self, data_loader, loss_arr, out_list, y_list, phase, epoch):
-        with torch.no_grad():
-            out_arr, y_arr = torch.cat(out_list), torch.cat(y_list)
-            self.logWriter.loss_per_epoch(loss_arr, 'train', epoch)
-            data_len = len(data_loader.dataset)
-            epoch_image_count = 5
-            index = np.random.choice(data_len, epoch_image_count, replace=False)
-            predictions = []
-            labels = []
-            for idx in index:
-                v_img, v_label, class_w, _ = data_loader.dataset[idx]
-                predictions.append(self.model.predict(v_img.unsqueeze(dim=0), self.device))
-                labels.append(v_label)
-
-            self.logWriter.image_per_epoch(predictions, labels, phase, epoch)
-            self.logWriter.cm_per_epoch(phase, out_arr, y_arr, epoch)
-            ds = self.logWriter.dice_score_per_epoch(phase, out_arr, y_arr, epoch)
+            ds = ds / batch_count
+            print("", flush=True)
             print("Dice score ", ds)
-        return ds
+            self.logWriter.dice_score_per_epoch(phase, ds, epoch)
+
+            if phase == 'val' and ds > self.best_ds_mean:
+                self.best_ds_mean = ds
+                self.best_ds_mean_epoch = epoch
 
     def save_best_model(self, path):
         """

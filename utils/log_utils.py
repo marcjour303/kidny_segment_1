@@ -56,12 +56,12 @@ class LogWriter(object):
     def log(self, text, phase='train'):
         self.logger.info(text)
 
-    def loss_per_iter(self, acc_loss_val, dice_loss_value, ce_loss_value,  i_batch, phase, current_iteration):
+    def loss_per_iter(self, acc_loss_val, dice_loss_value, ce_loss_value,  i_batch, phase, iteration):
         print('[Iteration : ' + str(i_batch) + '] CE Loss -> ' + str(ce_loss_value))
         print('[Iteration : ' + str(i_batch) + '] Dice Loss -> ' + str(dice_loss_value))
-        self.writer[phase].add_scalar('acc_loss/per_iteration', acc_loss_val, current_iteration)
-        self.writer[phase].add_scalar('dice_loss/per_iteration', dice_loss_value, current_iteration)
-        self.writer[phase].add_scalar('ce_loss/per_iteration', ce_loss_value, current_iteration)
+        self.writer[phase].add_scalar('acc_loss/per_iteration', acc_loss_val, iteration)
+        self.writer[phase].add_scalar('dice_loss/per_iteration', dice_loss_value, iteration)
+        self.writer[phase].add_scalar('ce_loss/per_iteration', ce_loss_value, iteration)
 
     def loss_per_epoch(self, loss_arr, phase, epoch):
         loss = np.mean(loss_arr)
@@ -101,9 +101,7 @@ class LogWriter(object):
         else:
             self.writer[phase].add_figure(caption + '/' + phase, fig)
 
-    def dice_score_per_epoch(self, phase, output, correct_labels, epoch):
-        ds = eu.dice_score_perclass(output, correct_labels)
-        #self.plot_dice_score(phase, 'dice_score_per_epoch', ds, 'Dice Score', epoch)
+    def dice_score_per_epoch(self, phase, ds, epoch):
         self.writer[phase].add_scalar('dice_score_per_epoch', ds, epoch)
         return ds.item()
 

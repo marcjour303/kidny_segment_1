@@ -116,30 +116,28 @@ class QuickNat(nn.Module):
         torch.save(self, path)
         #torch.save(self.state_dict(), path)
 
-    def predict(self, X, device=0, enable_dropout=False):
+    def predict(self, x_in, device=0, enable_dropout=False):
         """
         Predicts the output after the model is trained.
         Inputs:
-        - X: Volume to be predicted
+        - x_in: Volume to be predicted
         """
         self.eval()
 
-        if type(X) is np.ndarray:
-            X = torch.tensor(X, requires_grad=False).type(torch.FloatTensor).cuda(device, non_blocking=True)
-        elif type(X) is torch.Tensor and not X.is_cuda:
-            X = X.type(torch.FloatTensor).cuda(device, non_blocking=True)
-
-
+        if type(x_in) is np.ndarray:
+            x_in = torch.tensor(x_in, requires_grad=False).type(torch.FloatTensor).cuda(device, non_blocking=True)
+        elif type(x_in) is torch.Tensor and not x_in.is_cuda:
+            x_in = x_in.type(torch.FloatTensor).cuda(device, non_blocking=True)
 
         if enable_dropout:
             self.enable_test_dropout()
 
         with torch.no_grad():
-            out = self.forward(X)
+            out = self.forward(x_in)
 
         idx = out > 0.5
-        idx = idx.data.cpu().numpy().astype(int)
-        prediction = np.squeeze(idx)
+        idx = idx.type(torch.LongTensor)
+        prediction = torch.squeeze(idx).cuda(device, non_blocking=True)
 
-        del X, out, idx
+        del x_in, out, idx
         return prediction

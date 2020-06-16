@@ -148,19 +148,19 @@ class NiftiData(data.Dataset):
             if entry[4] > index:
                 idx = index - pointer
                 image = np.load(entry[0], mmap_mode='r+')[idx, :, :]
-                t_image = torch.unsqueeze(torch.from_numpy(image.copy()), 0)
+                t_image = torch.unsqueeze(torch.from_numpy(image), 0)
                 del image
 
                 label = np.load(entry[1], mmap_mode='r+')[idx, :, :]
-                t_label = torch.unsqueeze(torch.from_numpy(label.copy()), 0)
+                t_label = torch.unsqueeze(torch.from_numpy(label), 0)
                 del label
 
                 classWeight = np.load(entry[2], mmap_mode='r+')[idx, :, :]
-                t_classWeight = torch.unsqueeze(torch.from_numpy(classWeight.copy()), 0)
+                t_classWeight = torch.unsqueeze(torch.from_numpy(classWeight), 0)
                 del classWeight
 
                 weight = np.load(entry[3], mmap_mode='r+')
-                t_weight = torch.from_numpy(weight.copy())
+                t_weight = torch.from_numpy(weight)
                 del weight
 
                 return t_image, t_label, t_classWeight, t_weight
