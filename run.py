@@ -36,8 +36,10 @@ transform_val = transforms.Compose([
 def train(train_params, common_params, data_params, net_params):
     train_files, val_files = du.apply_split(data_params["data_skip"], data_params["train_data_file"], data_params["val_data_file"],
                                             data_params["data_split"], data_params["data_dir"])
-    train_data = NiftiData(train_files[:train_params['input_train_volumes']], data_params, train=True)
-    val_data = NiftiData(val_files[:train_params['input_val_volumes']], data_params, train=False)
+    #[:train_params['input_train_volumes']]
+    #[:train_params['input_val_volumes']]
+    train_data = NiftiData(train_files, data_params, train=True)
+    val_data = NiftiData(val_files, data_params, train=False)
     train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
 
 
@@ -84,7 +86,7 @@ def train_stage(train_data, val_data, train_params, common_params, data_params, 
     #final_model_path = os.path.join(common_params['save_model_dir'], train_params['final_model_file'])
     #solver.save_best_model(final_model_path)
     print("final model saved @ " + str(final_model_path))
-    solver.log_best_model_results(val_loader)
+    #solver.log_best_model_results(val_loader)
 
 
 def evaluate(eval_params, net_params, data_params, common_params, train_params):

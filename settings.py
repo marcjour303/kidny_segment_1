@@ -4,7 +4,6 @@ from collections.abc import Mapping
 
 
 class Settings(Mapping):
-    #def __init__(self, setting_file='settings.ini'):
     def __init__(self, setting_file):
         config = configparser.ConfigParser()
         config.read(setting_file)

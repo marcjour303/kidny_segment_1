@@ -68,39 +68,6 @@ class LogWriter(object):
         self.writer[phase].add_scalar('loss/per_epoch', loss, epoch)
         print('epoch ' + phase + ' loss = ' + str(loss))
 
-    def cm_per_epoch(self, phase, output, correct_labels, epoch):
-        _, cm = eu.dice_confusion_matrix(output, correct_labels, self.num_class, mode='train')
-        self.plot_cm('confusion_matrix', phase, cm, epoch)
-
-    def plot_cm(self, caption, phase, cm, step=None):
-        fig = matplotlib.figure.Figure(figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
-        ax = fig.add_subplot(1, 1, 1)
-
-        ax.imshow(cm, interpolation='nearest', cmap=self.cm_cmap)
-        ax.set_xlabel('Predicted', fontsize=7)
-        ax.set_xticks(np.arange(self.num_class))
-        c = ax.set_xticklabels(self.labels, fontsize=4, rotation=-90, ha='center')
-        ax.xaxis.set_label_position('bottom')
-        ax.xaxis.tick_bottom()
-
-        ax.set_ylabel('True Label', fontsize=7)
-        ax.set_yticks(np.arange(self.num_class))
-        ax.set_yticklabels(self.labels, fontsize=4, va='center')
-        ax.yaxis.set_label_position('left')
-        ax.yaxis.tick_left()
-
-        thresh = cm.max() / 2.
-        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-            ax.text(j, i, format(cm[i, j], '.2f') if cm[i, j] != 0 else '.', horizontalalignment="center", fontsize=6,
-                    verticalalignment='center', color="white" if cm[i, j] > thresh else "black")
-
-        fig.set_tight_layout(True)
-        np.set_printoptions(precision=2)
-        if step:
-            self.writer[phase].add_figure(caption + '/' + phase, fig, step)
-        else:
-            self.writer[phase].add_figure(caption + '/' + phase, fig)
-
     def dice_score_per_epoch(self, phase, ds, epoch):
         self.writer[phase].add_scalar('dice_score_per_epoch', ds, epoch)
         return ds.item()

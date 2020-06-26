@@ -104,6 +104,7 @@ class Solver(object):
             self.model_name, torch.cuda.get_device_name(self.device)))
         train_iteration = self.start_iteration
         val_iteration = self.start_iteration
+
         for epoch in range(self.start_epoch, self.num_epochs + 1):
             print("\n==== Epoch [ %d  /  %d ] START ====" % (epoch, self.num_epochs))
 
@@ -135,22 +136,23 @@ class Solver(object):
         loss_arr = []
 
         print("<<<= Phase: %s =>>>" % phase)
+
         for i_batch, sample_batched in enumerate(data_loader):
-            model = self.model
+
             X = sample_batched[0].type(torch.FloatTensor)
             y = sample_batched[1].type(torch.LongTensor)
             class_w = sample_batched[2].type(torch.FloatTensor)
 
-            if model.is_cuda:
+            if self.model.is_cuda:
                 X, y, class_w = X.cuda(self.device, non_blocking=True), \
                                    y.cuda(self.device, non_blocking=True), \
                                    class_w.cuda(self.device, non_blocking=True)
 
-            output = model(X)
+            output = self.model(X)
             loss = self.loss_func(output, y, class_weight=class_w)
 
             with torch.no_grad():
-                dice, ce = additional_losses.log_losses(output.detach(), y.detach(), class_w.detach())
+                dice, ce = additional_losses.calc_losses(output.detach(), y.detach(), class_w.detach())
 
             if i_batch % self.log_nth == 0:
                 self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
@@ -165,40 +167,8 @@ class Solver(object):
                     self.optim.zero_grad()
 
             del X, y, class_w, output, loss
-            del model
             torch.cuda.empty_cache()
             iteration += 1
-        self.log_results(data_loader, loss_arr, phase, epoch)
-        return iteration
-
-    def val_batch(self, data_loader, epoch, iteration):
-        self.model.eval()
-        phase = 'val'
-        loss_arr = []
-        print("<<<= Phase: %s =>>>" % phase)
-
-        for i_batch, sample_batched in enumerate(data_loader):
-            model = self.model
-            X = sample_batched[0].type(torch.FloatTensor)
-            y = sample_batched[1].type(torch.LongTensor)
-            class_w = sample_batched[2].type(torch.FloatTensor)
-            if model.is_cuda:
-                X, y, class_w = X.cuda(self.device, non_blocking=True), \
-                                   y.cuda(self.device, non_blocking=True), \
-                                   class_w.cuda(self.device, non_blocking=True)
-            output = model(X)
-            loss = self.loss_func(output, y, class_weight=class_w)
-            loss_arr.append(loss.item())
-
-            dice, ce = additional_losses.log_losses(output.detach(), y.detach(), class_w.detach())
-            if i_batch % self.log_nth == 0:
-                self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
-
-            del X, y, class_w, output, loss
-            del model
-            torch.cuda.empty_cache()
-            iteration += 1
-
         self.log_results(data_loader, loss_arr, phase, epoch)
         return iteration
 

@@ -212,7 +212,6 @@ class CombinedLoss(_Loss):
     def __init__(self, weight_mfb=None, pos_weight=None):
         super(CombinedLoss, self).__init__()
         self.dice_loss = DiceLoss()
-        self.bce_loss = nn.BCEWithLogitsLoss(weight=weight_mfb, pos_weight=pos_weight)
 
     def forward(self, input, target, class_weight=None):
         """
@@ -223,21 +222,17 @@ class CombinedLoss(_Loss):
         :param weight: torch.tensor (NxHxW)
         :return: scalar
         """
-
-        y_1 = self.dice_loss(input, target, binary=True)
-        y_2 = F.binary_cross_entropy(input, target.float(), reduction='none')
-        y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
+        y_1, y_2 = calc_losses(input, target, class_weight=class_weight)
         alpha = 1
-        beta = 1
+        beta = 0.5
         return alpha*y_1 + beta*y_2
 
 
-
-def log_losses(input, target, class_weight=None):
+def calc_losses(output, target, class_weight=None):
     dice_loss = DiceLoss()
-    y_1 = dice_loss(input, target, binary=True)
-    y_2 = F.binary_cross_entropy(input, target.float(), reduction='none')
-    y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
+    y_1 = dice_loss(output, target, binary=True)
+    y_2 = F.binary_cross_entropy(output, target.float(), weight=class_weight, reduction='mean')
+    #y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
     return y_1, y_2
 
 # Credit to https://github.com/clcarwin/focal_loss_pytorch
