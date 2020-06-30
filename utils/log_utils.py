@@ -29,22 +29,25 @@ def on_rm_error(func, path, exc_info):
 
 
 class LogWriter(object):
-    def __init__(self, num_class, log_dir_name, exp_name, use_last_checkpoint=False, labels=None,
+    def __init__(self, log_dir_name, exp_name, use_last_checkpoint=False, labels=None,
                  cm_cmap=plt.cm.Blues):
-        self.num_class = num_class
-        train_log_path, val_log_path = os.path.join(log_dir_name, exp_name, "train"), os.path.join(log_dir_name,
-                                                                                                   exp_name,
-                                                                                                   "val")
+        self.num_class=1
+        train_log_path, val_log_path, eval_log_path = os.path.join(log_dir_name, exp_name, "train"), \
+                                                      os.path.join(log_dir_name,exp_name,"val"), \
+                                                      os.path.join(log_dir_name, exp_name, "eval")
 
         if not use_last_checkpoint:
             if os.path.exists(train_log_path):
                 shutil.rmtree(train_log_path, onerror=on_rm_error)
             if os.path.exists(val_log_path):
                 shutil.rmtree(val_log_path, onerror=on_rm_error)
+            if os.path.exists(eval_log_path):
+                shutil.rmtree(eval_log_path, onerror=on_rm_error)
 
         self.writer = {
             'train': SummaryWriter(train_log_path),
-            'val': SummaryWriter(val_log_path)
+            'val': SummaryWriter(val_log_path),
+            'eval': SummaryWriter(eval_log_path)
         }
         self.curr_iter = 1
         self.cm_cmap = cm_cmap
@@ -63,9 +66,9 @@ class LogWriter(object):
         self.writer[phase].add_scalar('dice_loss/per_iteration', dice_loss_value, iteration)
         self.writer[phase].add_scalar('ce_loss/per_iteration', ce_loss_value, iteration)
 
-    def loss_per_epoch(self, loss_arr, phase, epoch):
+    def loss_per_epoch(self, loss_type, loss_arr, phase, epoch):
         loss = np.mean(loss_arr)
-        self.writer[phase].add_scalar('loss/per_epoch', loss, epoch)
+        self.writer[phase].add_scalar(loss_type + '/per_epoch', loss, epoch)
         print('epoch ' + phase + ' loss = ' + str(loss))
 
     def dice_score_per_epoch(self, phase, ds, epoch):
@@ -104,33 +107,16 @@ class LogWriter(object):
         for row_idx in range(nrows):
             prediction = predictions[row_idx]
             ground_truth = labels[row_idx]
-            ax[row_idx, 0].imshow(prediction.squeeze(), vmax=abs(prediction).max(), vmin=-abs(prediction).max())
+            ax[row_idx, 0].imshow(prediction, vmax=abs(prediction).max(), vmin=-abs(prediction).max())
             ax[row_idx, 0].set_title("Predicted", fontsize=10, color="blue")
             ax[row_idx, 0].axis('off')
-            ax[row_idx, 1].imshow(ground_truth.squeeze(), vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
+            ax[row_idx, 1].imshow(ground_truth, vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
             ax[row_idx, 1].set_title("Ground Truth", fontsize=10, color="blue")
             ax[row_idx, 1].axis('off')
             fig.set_tight_layout(True)
 
         self.writer[phase].add_figure('sample_prediction/' + phase, fig, epoch)
-        print('DONE', flush=True)
 
-    def best_model_validation_images(self, prediction, ground_truth):
-        print("Best model validation images...", end='', flush=True)
-        ncols = 2
-        nrows = 1
-        fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 20))
-
-        ax[0].imshow(prediction.squeeze(), vmax=abs(prediction).max(), vmin=-abs(prediction).max())
-        ax[0].set_title("Predicted", fontsize=10, color="blue")
-        ax[0].axis('off')
-        ax[1].imshow(ground_truth.squeeze(), vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
-        ax[1].set_title("Ground Truth", fontsize=10, color="blue")
-        ax[1].axis('off')
-        fig.set_tight_layout(True)
-
-        self.writer['val'].add_figure('sample_best_model_val_prediction/' + 'val_success', fig)
-        print('DONE', flush=True)
 
     def graph(self, model, X):
         self.writer['train'].add_graph(model, X)
@@ -138,6 +124,7 @@ class LogWriter(object):
     def close(self):
         self.writer['train'].close()
         self.writer['val'].close()
+        self.writer['eval'].close()
 
     def beautify_labels(self, labels):
         classes = [re.sub(r'([a-z](?=[A-Z])|[A-Z](?=[A-Z][a-z]))', r'\1 ', x) for x in labels]

@@ -51,48 +51,15 @@ class DiceLoss(_WeightedLoss):
         :return:
         """
 
-        eps = 0.0001
         smooth = 1.
         target = target.float()
         intersection = output * target
-        numerator = 2 * (intersection.sum() + smooth)
+        numerator = 2 * (intersection.sum())
         denominator = output + target
-        denominator = denominator.sum() + eps + smooth
-        loss_per_channel = 1 - (numerator / denominator)
+        denominator = denominator.sum()
+        loss_per_channel = 1 - ((numerator + smooth) / (denominator + smooth))
 
         return loss_per_channel
-
-
-        #eps = 0.0001
-        #if weights is None:
-        #    weights = 1
-        #target_f = target.float()
-        #intersection = output * target_f
-        #union = (output + target_f)
-
-        #print_separate = random.random() > 0.6
-        #if print_separate:
-        #    out_path = Path(os.path.join("E:\\", "label_vis_data_utils", "predictions", "dice_data"))
-        #    if not out_path.exists():
-        #        out_path.mkdir()
-        #    fig, ax = plt.subplots(1, 4)
-        #    t1 = output.detach().cpu().numpy().squeeze()
-        #    t2 = target.detach().cpu().numpy().squeeze()
-        #    t3 = intersection.detach().cpu().numpy().squeeze()
-        #    t4 = union.detach().cpu().numpy().squeeze()
-        #    _ = ax[0].imshow(t1, vmax=abs(t1).max(), vmin=abs(t1).min(), cmap='Greys')
-        #    _ = ax[1].imshow(t2, vmax=abs(t2).max(), vmin=abs(t2).min(), cmap='Greys')
-        #    _ = ax[2].imshow(t3, vmax=abs(t3).max(), vmin=abs(t3).min(), cmap='Greys')
-        #    _ = ax[3].imshow(t4, vmax=abs(t4).max(), vmin=abs(t4).min(), cmap='Greys')
-        #    fig_path = os.path.join(out_path, "_" + str(random.random()) + "_img_" +'.jpeg')
-        #    fig.savefig(str(fig_path))
-
-        #smooth = 1
-
-        #nom = 2 * (intersection.sum() + smooth)
-        #denom = union.sum() + smooth
-        #loss_val = 1 - (nom / denom)
-        #return loss_val
 
     @staticmethod
     def _dice_loss_multichannel(output, target, weights=None, ignore_index=None):
@@ -184,24 +151,24 @@ class IoULoss(_WeightedLoss):
         return loss_per_channel.sum() / output.size(1)
 
 
-class CrossEntropyLoss2d(_WeightedLoss):
+class BinaryCrossEntropy2D(_WeightedLoss):
     """
     Standard pytorch weighted nn.CrossEntropyLoss
     """
 
-    def __init__(self, weight_mfb=None):
-        super(CrossEntropyLoss2d, self).__init__()
-        self.nll_loss = nn.CrossEntropyLoss(weight_mfb, reduction='none')
+    def __init__(self):
+        super(BinaryCrossEntropy2D, self).__init__()
+        self.nll_loss = nn.BCELoss(reduction='none')
 
     def forward(self, inputs, targets):
         """
         Forward pass
-
         :param inputs: torch.tensor (NxC)
         :param targets: torch.tensor (N)
         :return: scalar
         """
         return self.nll_loss(inputs, targets)
+
 
 
 class CombinedLoss(_Loss):
@@ -212,6 +179,7 @@ class CombinedLoss(_Loss):
     def __init__(self, weight_mfb=None, pos_weight=None):
         super(CombinedLoss, self).__init__()
         self.dice_loss = DiceLoss()
+        self.cross_entropy = BinaryCrossEntropy2D()
 
     def forward(self, input, target, class_weight=None):
         """
@@ -222,64 +190,18 @@ class CombinedLoss(_Loss):
         :param weight: torch.tensor (NxHxW)
         :return: scalar
         """
-        y_1, y_2 = calc_losses(input, target, class_weight=class_weight)
+        y_1, y_2 = self.calc_losses(input, target, class_weight=class_weight)
         alpha = 1
-        beta = 0.5
+        beta = 1
         return alpha*y_1 + beta*y_2
 
 
-def calc_losses(output, target, class_weight=None):
-    dice_loss = DiceLoss()
-    y_1 = dice_loss(output, target, binary=True)
-    y_2 = F.binary_cross_entropy(output, target.float(), weight=class_weight, reduction='mean')
-    #y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
-    return y_1, y_2
+    def calc_losses(self, output, target, class_weight=None):
 
-# Credit to https://github.com/clcarwin/focal_loss_pytorch
-class FocalLoss(nn.Module):
+        y_1 = self.dice_loss(output, target, binary=True)
+        y_2 = torch.mean(torch.mul(self.cross_entropy.forward(output, target.float()), class_weight))
 
-    def __init__(self, gamma=2, alpha=None, size_average=True):
+        # y_2 = F.binary_cross_entropy(output, target.float(), weight=class_weight, reduction='mean')
+        #y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
+        return y_1, y_2
 
-        super(FocalLoss, self).__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-        if isinstance(alpha, (float, int)):
-            self.alpha = torch.Tensor([alpha, 1-alpha])
-        if isinstance(alpha, list):
-            self.alpha = torch.Tensor(alpha)
-        self.size_average = size_average
-
-    def forward(self, input, target):
-        """Forward pass
-
-        :param input: shape = NxCxHxW
-        :type input: torch.tensor
-        :param target: shape = NxHxW
-        :type target: torch.tensor
-        :return: loss value
-        :rtype: torch.tensor
-        """
-
-        if input.dim() > 2:
-            # N,C,H,W => N,C,H*W
-            input = input.view(input.size(0), input.size(1), -1)
-            input = input.transpose(1, 2)    # N,C,H*W => N,H*W,C
-            input = input.contiguous().view(-1, input.size(2))   # N,H*W,C => N*H*W,C
-        target = target.view(-1, 1)
-
-        logpt = F.log_softmax(input, dim=1)
-        logpt = logpt.gather(1, target)
-        logpt = logpt.view(-1)
-        pt = Variable(logpt.data.exp())
-
-        if self.alpha is not None:
-            if self.alpha.type() != input.data.type():
-                self.alpha = self.alpha.type_as(input.data)
-            at = self.alpha.gather(0, target.data.view(-1))
-            logpt = logpt * Variable(at)
-
-        loss = -1 * (1-pt)**self.gamma * logpt
-        if self.size_average:
-            return loss.mean()
-        else:
-            return loss.sum()

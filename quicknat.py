@@ -5,27 +5,6 @@ import torch.nn as nn
 from nn_common_modules import modules as sm
 from squeeze_and_excitation import squeeze_and_excitation as se
 
-from pathlib import Path
-import os
-import random
-import matplotlib.pyplot as plt
-
-vis_count = 0
-
-def visualize_layer(layer, phase):
-    layer1 = np.squeeze(layer.detach().cpu().numpy())
-    out_path = Path(os.path.join("E:\\", "label_vis_data_utils", phase))
-    if not out_path.exists():
-        out_path.mkdir()
-    if vis_count == 1 or vis_count == 10:
-        fig, ax = plt.subplots(layer1.shape[0]//10+1, 10)
-        for i in range(layer1.shape[0]):
-            idx = i // 10
-            idy = i % 10
-            _ = ax[idx, idy].imshow(layer1[i])
-            fig_path = os.path.join(out_path, "_img_" + str(vis_count) + "_" + str(phase) + '.jpeg')
-        fig.savefig(str(fig_path))
-
 
 class QuickNat(nn.Module):
     """
@@ -63,7 +42,6 @@ class QuickNat(nn.Module):
         params['num_channels'] = 64
         self.classifier = sm.ClassifierBlock(params)
         self.sigmoid = nn.Sigmoid()
-
 
     def forward(self, input):
         """

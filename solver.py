@@ -60,15 +60,14 @@ class Solver(object):
         self.scheduler = lr_scheduler.StepLR(self.optim, step_size=lr_scheduler_step_size,
                                              gamma=lr_scheduler_gamma)
 
-        #self.scheduler = lr_scheduler.ReduceLROnPlateau(self.optim, patience=2, mode='min')
         exp_dir_path = os.path.join(exp_dir, exp_name)
         common_utils.create_if_not(exp_dir_path)
         common_utils.create_if_not(os.path.join(exp_dir_path, CHECKPOINT_DIR))
         self.exp_dir_path = exp_dir_path
 
         self.log_nth = log_nth
-        print(log_dir)
-        self.logWriter = LogWriter(num_class, log_dir, exp_name, use_last_checkpoint, labels)
+
+        self.logWriter = LogWriter(log_dir, exp_name, use_last_checkpoint, labels)
 
         self.use_last_checkpoint = use_last_checkpoint
 
@@ -77,6 +76,9 @@ class Solver(object):
 
         self.best_ds_mean = 0
         self.best_ds_mean_epoch = 0
+
+        self.last_val_loss = -1
+        self.loss_increase_count = 0
 
         self.val_batch_size = val_batch_size
         self.train_batch_size = train_batch_size
@@ -127,6 +129,9 @@ class Solver(object):
             }, os.path.join(self.exp_dir_path, CHECKPOINT_DIR,
                             'checkpoint_epoch_' + str(epoch) + '.' + CHECKPOINT_EXTENSION))
 
+            if self.loss_increase_count > 1:
+                break
+
         print('FINISH.')
 
         self.logWriter.close()
@@ -134,7 +139,8 @@ class Solver(object):
     def train_batch(self, data_loader, epoch, phase, iteration):
 
         loss_arr = []
-
+        dice_loss_arr = []
+        ce_loss_arr = []
         print("<<<= Phase: %s =>>>" % phase)
 
         for i_batch, sample_batched in enumerate(data_loader):
@@ -152,12 +158,16 @@ class Solver(object):
             loss = self.loss_func(output, y, class_weight=class_w)
 
             with torch.no_grad():
-                dice, ce = additional_losses.calc_losses(output.detach(), y.detach(), class_w.detach())
+                dice, ce = self.loss_func.calc_losses(output.detach(), y.detach(), class_w.detach())
 
             if i_batch % self.log_nth == 0:
-                self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
+                print('[Iteration : ' + str(i_batch) + '] CE Loss -> ' + str(ce))
+                print('[Iteration : ' + str(i_batch) + '] Dice Loss -> ' + str(dice))
+                #self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
 
             loss_arr.append(loss.item())
+            dice_loss_arr.append(dice.cpu().numpy())
+            ce_loss_arr.append(ce.cpu().numpy())
 
             if phase == 'train':
                 loss.backward()
@@ -169,15 +179,28 @@ class Solver(object):
             del X, y, class_w, output, loss
             torch.cuda.empty_cache()
             iteration += 1
-        self.log_results(data_loader, loss_arr, phase, epoch)
+
+        self.logWriter.loss_per_epoch("accumulated_loss", loss_arr, phase, epoch)
+        self.logWriter.loss_per_epoch("dice_loss", dice_loss_arr, phase, epoch)
+        self.logWriter.loss_per_epoch("ce_loss", ce_loss_arr, phase, epoch)
+
+        self.log_results(data_loader, phase, epoch)
+        if phase == 'val':
+            val_loss = np.mean(loss_arr)
+            if self.last_val_loss != -1:
+                val_loss = np.mean(loss_arr)
+                if val_loss > self.last_val_loss:
+                    self.loss_increase_count += 1
+                else:
+                    self.loss_increase_count = 0
+            self.last_val_loss = val_loss
         return iteration
 
-    def log_results(self, data_loader, loss_arr, phase, epoch):
+    def log_results(self, data_loader, phase, epoch):
         print("Computing model accuracy ")
         with torch.no_grad():
             ds = 0
             batch_count = 0
-            self.logWriter.loss_per_epoch(loss_arr, phase, epoch)
             for i_batch, sample_batched in enumerate(data_loader):
                 x_in = sample_batched[0].type(torch.FloatTensor)
                 labels = sample_batched[1].type(torch.LongTensor).squeeze()

@@ -1,6 +1,6 @@
 import os
 
-import h5py
+from pathlib import Path
 import nibabel as nb
 import numpy as np
 
@@ -9,7 +9,7 @@ import random
 from scipy.ndimage.interpolation import map_coordinates
 from scipy import interpolate as ipol
 from sklearn.utils import shuffle
-import utils.kits_data_utils  as kutils
+import utils.kits_data_utils as kutils
 
 
 from skimage.transform import resize
@@ -107,50 +107,6 @@ def elastic_deformation(image, x_coord, y_coord, dx, dy):
 # Data Loader Utils
 # ====================================================================================================================
 
-
-def write_dataset_to_h5stream(file_paths, dt_load_params, f, mode):
-    print("Loading and preprocessing data...")
-
-    for i, file_path in enumerate(file_paths):
-        volume, labelmap, class_weights, weights = load_and_preprocess(file_path, dt_load_params)
-        if i == 0:
-            with h5py.File(f[mode]['data'], 'w') as data_handle:
-                data_handle.create_dataset('data', data=volume, compression="gzip", chunks=True,
-                                           maxshape=(None,  volume.shape[1], volume.shape[2]))
-            with h5py.File(f[mode]['label'], 'w') as label_handle:
-                label_handle.create_dataset('label', data=labelmap, compression="gzip", chunks=True,
-                                            maxshape=(None, labelmap.shape[1], labelmap.shape[2]))
-            with h5py.File(f[mode]['weights'], 'w') as weights_handle:
-                weights_handle.create_dataset('weights', data=weights, compression="gzip", chunks=True,
-                                              maxshape=(None,))
-            with h5py.File(f[mode]['class_weights'], 'w') as class_weights_handle:
-                class_weights_handle.create_dataset('class_weights', data=class_weights, compression="gzip", chunks=True,
-                                                    maxshape=(None,  class_weights.shape[1], class_weights.shape[2]))
-        else:
-            append_to_h5(volume, labelmap, class_weights, weights, f, mode)
-        del volume, labelmap, class_weights, weights
-        print("#", end='', flush=True)
-    print("100%", flush=True)
-
-
-def append_to_h5(data, label, class_weights, weights, f, mode):
-    print("data shape ", data[0].shape)
-
-    with h5py.File(f[mode]['data'], 'a') as data_handle:
-        h5_append_with_handler(data_handle, 'data', data)
-    with h5py.File(f[mode]['label'], 'a') as label_handle:
-        h5_append_with_handler(label_handle, 'label', label)
-    with h5py.File(f[mode]['weights'], 'a') as weights_handle:
-        h5_append_with_handler(weights_handle, 'weights', weights)
-    with h5py.File(f[mode]['class_weights'], "w") as class_weights_handle:
-        h5_append_with_handler(class_weights_handle, 'class_weights', class_weights)
-
-
-def h5_append_with_handler(data_handle, data_key, data):
-    data_handle[data_key].resize((data_handle[data_key].shape[0] + data.shape[0]), axis=0)
-    data_handle[data_key][-data.shape[0]:] = data
-
-
 def square_and_resize_volume(volume, targetResolution, nearestNeighbor=False, debug=False):
     if debug:
         print('    Resizing from ' + str(volume.shape[0]) + 'x' + str(volume.shape[1]) + 'x' + str(volume.shape[2]) +
@@ -235,25 +191,42 @@ def load_nft_volumes(file_path, load_params):
     return volume, labelmap
 
 
-def apply_split(data_skip, train_file, val_file, data_split, data_dir):
-    file_paths = kutils.load_file_paths(data_skip, data_dir)
-    print("Total no of volumes to process : %d" % len(file_paths))
+def load_volume_paths_from_case_file(data_dir, file_path):
+    data_dir = Path(data_dir)
+    volumes_to_use = kutils.get_case_numbers_from_file(file_path)
+
+    vol_files = [
+        [os.path.join(kutils.get_case_path(data_dir, case), 'imaging.nii.gz'),
+         os.path.join(kutils.get_case_path(data_dir, case), 'segmentation.nii.gz')]
+        for
+        case in volumes_to_use]
+    return vol_files
+
+
+def filter_and_split_data(data_params):
+    data_skip_file , test_data_file = data_params["data_skip"], data_params["test_data"]
+    train_file, val_file = data_params["train_data_file"], data_params["val_data_file"],
+    data_split, data_dir = data_params["data_split"], data_params["data_dir"]
+
+    data_skip = kutils.get_case_numbers_from_file(data_skip_file)
+    test_data = kutils.get_case_numbers_from_file(test_data_file)
+    case_numbers = kutils.filter_case_numbers(data_skip, test_data, data_dir)
+
+    print("Total no of volumes to process : %d" % len(case_numbers))
     train_ratio, test_ratio = data_split.split(",")
-    train_len = int((int(train_ratio) / 100) * len(file_paths))
-    train_idx = np.random.choice(len(file_paths), train_len, replace=False)
-    val_idx = np.array([i for i in range(len(file_paths)) if i not in train_idx])
-    train_file_paths = [file_paths[i] for i in train_idx]
-    val_file_paths = [file_paths[i] for i in val_idx]
-    #train_file_paths = file_paths[:train_len]
-    #val_file_paths = file_paths[train_len:]
-    #train_data['cases'] = np.array(train_file_paths, dtype=int).tolist()
+    train_len = int((int(train_ratio) / 100) * len(case_numbers))
+    train_idx = np.random.choice(len(case_numbers), train_len, replace=False)
+    val_idx = np.array([i for i in range(len(case_numbers)) if i not in train_idx])
+    train_cases = [case_numbers[i] for i in train_idx]
+    val_cases = [case_numbers[i] for i in val_idx]
 
     train_data = {}
-    train_data['cases'] = train_file_paths
+    train_data['cases'] = train_cases
     kutils.write_to_file(train_file, train_data)
 
+
     val_data = {}
-    val_data['cases'] = val_file_paths
+    val_data['cases'] = val_cases
     kutils.write_to_file(val_file, val_data)
 
-    return train_file_paths, val_file_paths
+    return

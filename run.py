@@ -34,20 +34,17 @@ transform_val = transforms.Compose([
 
 
 def train(train_params, common_params, data_params, net_params):
-    train_files, val_files = du.apply_split(data_params["data_skip"], data_params["train_data_file"], data_params["val_data_file"],
-                                            data_params["data_split"], data_params["data_dir"])
-    #[:train_params['input_train_volumes']]
-    #[:train_params['input_val_volumes']]
-    train_data = NiftiData(train_files, data_params, train=True)
-    val_data = NiftiData(val_files, data_params, train=False)
-    train_stage(train_data, val_data, train_params, common_params, data_params, net_params)
 
+    du.filter_and_split_data(data_params)
+    train_files = du.load_volume_paths_from_case_file(data_params["data_dir"], data_params["train_data_file"])
+    val_files = du.load_volume_paths_from_case_file(data_params["data_dir"], data_params["val_data_file"])
 
-def train_stage(train_data, val_data, train_params, common_params, data_params, net_params):
+    train_data = NiftiData(train_files, data_params, mode='train')
+    val_data = NiftiData(val_files, data_params, mode='val')
 
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=train_params['train_batch_step_size'], shuffle=True,
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=train_params['batch_step_size'], shuffle=True,
                                                num_workers=4, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['val_batch_step_size'], shuffle=True,
+    val_loader = torch.utils.data.DataLoader(val_data, batch_size=train_params['batch_step_size'], shuffle=True,
                                              num_workers=4, pin_memory=True)
 
     if train_params['use_pre_trained']:
@@ -57,6 +54,7 @@ def train_stage(train_data, val_data, train_params, common_params, data_params, 
         quicknat_model = QuickNat(net_params)
 
     solver = Solver(quicknat_model,
+                    exp_name=train_params['exp_name'],
                     device=common_params['device'],
                     num_class=net_params['num_class'],
                     optim_args={"lr": train_params['learning_rate'],
@@ -64,7 +62,6 @@ def train_stage(train_data, val_data, train_params, common_params, data_params, 
                                 "eps": train_params['optim_eps'],
                                 "weight_decay": train_params['optim_weight_decay']},
                     model_name=common_params['model_name'],
-                    exp_name=train_params['exp_name'],
                     labels=data_params['labels'],
                     log_nth=train_params['log_nth'],
                     num_epochs=train_params['num_epochs'],
@@ -77,44 +74,61 @@ def train_stage(train_data, val_data, train_params, common_params, data_params, 
                     val_batch_size=train_params['val_batch_size'])
 
     solver.train(train_loader, val_loader)
-    #train_data.close_files()
-    #val_data.close_files()
 
     final_model_path = os.path.join(common_params['save_model_dir'], train_params['final_model_file'])
-    quicknat_model.save(final_model_path)
+    solver.save_best_model(final_model_path)
 
-    #final_model_path = os.path.join(common_params['save_model_dir'], train_params['final_model_file'])
-    #solver.save_best_model(final_model_path)
     print("final model saved @ " + str(final_model_path))
-    #solver.log_best_model_results(val_loader)
+
 
 
 def evaluate(eval_params, net_params, data_params, common_params, train_params):
 
     eval_model_path = eval_params['eval_model_path']
-    num_classes = net_params['num_class']
-    labels = data_params['labels']
-    data_dir = eval_params['data_dir']
-    volumes_txt_file = eval_params['volumes_txt_file']
+
+    save_predictions_dir = eval_params['save_predictions_dir']
     # go to evaluator, remap_labels and add an option "do nothing", because you don't need to remap anything
-    remap_config = eval_params['remap_config']
+
     device = common_params['device']
     log_dir = common_params['log_dir']
     exp_dir = common_params['exp_dir']
     exp_name = train_params['exp_name']
-    save_predictions_dir = eval_params['save_predictions_dir']
-    #prediction_path = os.path.join(exp_dir, exp_name, save_predictions_dir)
-    prediction_path = os.path.join("E:\\", "CT_VIZ")
-    orientation = eval_params['orientation']
+    prediction_path = os.path.join(exp_dir, exp_name, save_predictions_dir)
 
-    quicknat_model = QuickNat(net_params)
+    print("Loading pretrained model")
+    #Load trained model
+    print(eval_params['eval_model_path'])
+    model_path = eval_params['eval_model_path']
+    quicknat_model= QuickNat(net_params)
 
-    logWriter = LogWriter(num_classes, log_dir, exp_name, labels=labels)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        quicknat_model.cuda(device)
 
-    dice_score = eu.evaluate_dice_score(quicknat_model, None, eval_model_path, num_classes, data_dir, volumes_txt_file,
-                                        remap_config, orientation, prediction_path, device, logWriter, downsample=4)
-    score = dice_score
-    avg_dice_score, class_dist = score
+    if not device:
+        quicknat_model.load_state_dict(torch.load(model_path))
+        quicknat_model.to(device)
+    else:
+        #checkpoint = torch.load(model_path)
+        #quicknat_model.load_state_dict(checkpoint['state_dict'])
+        #quicknat_model.load_state_dict(torch.load(model_path, map_location=device))
+
+        quicknat_model = torch.load(eval_params['eval_model_path'],  map_location = device)
+
+    # Load test data
+    print("Loading test data")
+    eval_files = du.load_volume_paths_from_case_file(data_params["data_dir"], data_params["val_data_file"])
+    eval_data = NiftiData(eval_files[:1], data_params, mode='eval')
+    eval_loader = torch.utils.data.DataLoader(eval_data, batch_size=train_params['batch_step_size'],
+                                              shuffle=False, num_workers=4, pin_memory=True)
+
+    #Evaluate and log model results
+    logWriter = LogWriter(log_dir, exp_name, labels=data_params['labels'])
+    dice_score = eu.evaluate_dice_score(model=quicknat_model,
+                                        data_loader=eval_loader,
+                                        device=device,
+                                        logWriter=logWriter)
+    print("Average test dice score: ", dice_score)
     logWriter.close()
 
 

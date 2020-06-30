@@ -28,9 +28,9 @@ def estimate_weights_mfb(labels):
         class_weights += (median_freq / counts[i]) * np.array(labels == label)
         weights[int(label)] = median_freq / counts[i]
 
-    #grads = np.gradient(labels)
-    #edge_weights = (grads[0] ** 2 + grads[1] ** 2) > 0
-    #class_weights += 2 * edge_weights
+    grads = np.gradient(labels)
+    edge_weights = (grads[0] ** 2 + grads[1] ** 2) > 0
+    class_weights += 2 * edge_weights
 
     return class_weights, weights
 
