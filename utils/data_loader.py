@@ -127,3 +127,45 @@ class NiftiData(data.Dataset):
 
     def __len__(self):
         return self.length
+
+    def get_volume_numbers(self):
+        return len(self.file_list)
+
+    def get_volume_file_name(self, idx):
+        volume, label = self.file_list[idx][0], self.file_list[idx][1]
+        return volume, label
+
+
+class MiniDataset(data.Dataset):
+
+    def __init__(self, vol_file, label_file):
+
+        self.vol_file = vol_file
+        self.label_file = label_file
+
+        vol_np = np.load(self.vol_file)
+        self.length = vol_np.shape[0]
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+
+        image = np.load(self.vol_file, mmap_mode='r+')[idx, :, :]
+        t_image = torch.unsqueeze(torch.from_numpy(image), 0)
+        del image
+
+        label = np.load(self.label_file, mmap_mode='r+')[idx, :, :]
+        t_label = torch.unsqueeze(torch.from_numpy(label), 0)
+        del label
+
+        return t_image, t_label
+
+
+def get_volume_mini_dataloader(vol_file_path, label_file_path, batch_size):
+
+    eval_dataset = MiniDataset(vol_file_path, label_file_path)
+    eval_loader = torch.utils.data.DataLoader(eval_dataset, batch_size=batch_size, shuffle=False,
+                                              num_workers=4, pin_memory=True)
+
+    return eval_loader

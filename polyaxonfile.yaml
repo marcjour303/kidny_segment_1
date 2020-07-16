@@ -16,8 +16,8 @@ build:
 environment:
   resources:
     cpu:
-      requests: 4
-      limits: 8
+      requests: 3
+      limits: 4
     memory:
       requests: 2048
       limits: 8196

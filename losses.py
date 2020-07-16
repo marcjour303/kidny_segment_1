@@ -15,9 +15,8 @@ Members
 """
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss, _WeightedLoss
-from torch.autograd import Variable
+
 
 
 class DiceLoss(_WeightedLoss):
@@ -36,7 +35,7 @@ class DiceLoss(_WeightedLoss):
         :param binary: bool for binarized one chaneel(C=1) input
         :return: torch.tensor
         """
-        #output = F.softmax(output, dim=1)
+
         if binary:
             return self._dice_loss_binary(output, target, weights)
         return self._dice_loss_multichannel(output, target, weights, ignore_index)
@@ -58,7 +57,6 @@ class DiceLoss(_WeightedLoss):
         denominator = output + target
         denominator = denominator.sum()
         loss_per_channel = 1 - ((numerator + smooth) / (denominator + smooth))
-
         return loss_per_channel
 
     @staticmethod
@@ -101,56 +99,6 @@ class DiceLoss(_WeightedLoss):
         return loss_per_channel.sum() / output.size(1)
 
 
-class IoULoss(_WeightedLoss):
-    """
-    IoU Loss for a batch of samples
-    """
-
-    def forward(self, output, target, weights=None, ignore_index=None):
-        """Forward pass
-        
-        :param output: shape = NxCxHxW
-        :type output: torch.tensor [FloatTensor]
-        :param target: shape = NxHxW
-        :type target: torch.tensor [LongTensor]
-        :param weights: shape = C, defaults to None
-        :type weights: torch.tensor [FloatTensor], optional
-        :param ignore_index: index to ignore from loss, defaults to None
-        :type ignore_index: int, optional
-        :return: loss value
-        :rtype: torch.tensor
-        """
-
-        output = F.softmax(output, dim=1)
-
-        eps = 0.0001
-        encoded_target = output.detach() * 0
-
-        if ignore_index is not None:
-            mask = target == ignore_index
-            target = target.clone()
-            target[mask] = 0
-            encoded_target.scatter_(1, target.unsqueeze(1), 1)
-            mask = mask.unsqueeze(1).expand_as(encoded_target)
-            encoded_target[mask] = 0
-        else:
-            encoded_target.scatter_(1, target.unsqueeze(1), 1)
-
-        if weights is None:
-            weights = 1
-
-        intersection = output * encoded_target
-        numerator = intersection.sum(0).sum(1).sum(1)
-        denominator = (output + encoded_target) - (output*encoded_target)
-
-        if ignore_index is not None:
-            denominator[mask] = 0
-        denominator = denominator.sum(0).sum(1).sum(1) + eps
-        loss_per_channel = weights * (1 - (numerator / denominator))
-
-        return loss_per_channel.sum() / output.size(1)
-
-
 class BinaryCrossEntropy2D(_WeightedLoss):
     """
     Standard pytorch weighted nn.CrossEntropyLoss
@@ -168,7 +116,6 @@ class BinaryCrossEntropy2D(_WeightedLoss):
         :return: scalar
         """
         return self.nll_loss(inputs, targets)
-
 
 
 class CombinedLoss(_Loss):
@@ -195,13 +142,10 @@ class CombinedLoss(_Loss):
         beta = 1
         return alpha*y_1 + beta*y_2
 
-
     def calc_losses(self, output, target, class_weight=None):
 
         y_1 = self.dice_loss(output, target, binary=True)
         y_2 = torch.mean(torch.mul(self.cross_entropy.forward(output, target.float()), class_weight))
 
-        # y_2 = F.binary_cross_entropy(output, target.float(), weight=class_weight, reduction='mean')
-        #y_2 = torch.mean(torch.mul(y_2, class_weight.cuda()))
         return y_1, y_2
 

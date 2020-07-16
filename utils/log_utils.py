@@ -100,23 +100,67 @@ class LogWriter(object):
         ax.xaxis.tick_bottom()
         self.writer['val'].add_figure(caption, fig)
 
-    def image_per_epoch(self, predictions, labels, phase, epoch):
-        ncols = 2
+    def image_per_epoch(self, batch_data, batch_type, phase, epoch):
+        predictions = batch_data['pred']
+        labels = batch_data['gt']
+        x_in = batch_data['input']
+
+        ncols = 3
         nrows = len(predictions)
         fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 20))
         for row_idx in range(nrows):
             prediction = predictions[row_idx]
             ground_truth = labels[row_idx]
-            ax[row_idx, 0].imshow(prediction, vmax=abs(prediction).max(), vmin=-abs(prediction).max())
+            dt_input = x_in[row_idx]
+            ax[row_idx, 0].imshow(prediction, vmax=1, vmin=0, cmap='gray')
             ax[row_idx, 0].set_title("Predicted", fontsize=10, color="blue")
             ax[row_idx, 0].axis('off')
-            ax[row_idx, 1].imshow(ground_truth, vmax=abs(ground_truth).max(), vmin=-abs(ground_truth).max())
-            ax[row_idx, 1].set_title("Ground Truth", fontsize=10, color="blue")
+
+            ax[row_idx, 1].imshow(dt_input, vmax=dt_input.max(), vmin=dt_input.min(), cmap='gray')
+            ax[row_idx, 1].set_title("Input", fontsize=10, color="blue")
             ax[row_idx, 1].axis('off')
+
+            ax[row_idx, 2].imshow(ground_truth, vmax=1, vmin=0, cmap='gray')
+            ax[row_idx, 2].set_title("Ground Truth", fontsize=10, color="blue")
+            ax[row_idx, 2].axis('off')
             fig.set_tight_layout(True)
 
-        self.writer[phase].add_figure('sample_prediction/' + phase, fig, epoch)
+        self.writer[phase].add_figure('sample_prediction/' + phase + batch_type + " " + str(batch_data['score']), fig, epoch)
 
+    def cm_per_epoch(self, phase, output, correct_labels, epoch):
+        print("Confusion Matrix...", end='', flush=True)
+        _, cm = eu.dice_confusion_matrix(output, correct_labels, self.num_class, mode='train')
+        self.plot_cm('confusion_matrix', phase, cm, epoch)
+        print("DONE", flush=True)
+
+    def plot_cm(self, caption, phase, cm, step=None):
+        fig = matplotlib.figure.Figure(figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
+        ax = fig.add_subplot(1, 1, 1)
+
+        ax.imshow(cm, interpolation='nearest', cmap=self.cm_cmap)
+        ax.set_xlabel('Predicted', fontsize=7)
+        ax.set_xticks(np.arange(self.num_class))
+        c = ax.set_xticklabels(self.labels, fontsize=4, rotation=-90, ha='center')
+        ax.xaxis.set_label_position('bottom')
+        ax.xaxis.tick_bottom()
+
+        ax.set_ylabel('True Label', fontsize=7)
+        ax.set_yticks(np.arange(self.num_class))
+        ax.set_yticklabels(self.labels, fontsize=4, va='center')
+        ax.yaxis.set_label_position('left')
+        ax.yaxis.tick_left()
+
+        thresh = cm.max() / 2.
+        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+            ax.text(j, i, format(cm[i, j], '.2f') if cm[i, j] != 0 else '.', horizontalalignment="center", fontsize=6,
+                    verticalalignment='center', color="white" if cm[i, j] > thresh else "black")
+
+        fig.set_tight_layout(True)
+        np.set_printoptions(precision=2)
+        if step:
+            self.writer[phase].add_figure(caption + '/' + phase, fig, step)
+        else:
+            self.writer[phase].add_figure(caption + '/' + phase, fig)
 
     def graph(self, model, X):
         self.writer['train'].add_graph(model, X)

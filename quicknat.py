@@ -115,7 +115,7 @@ class QuickNat(nn.Module):
 
         idx = out > 0.5
         idx = idx.type(torch.LongTensor)
-        prediction = torch.squeeze(idx).cuda(device, non_blocking=True)
+        prediction = torch.squeeze(idx, axis=1).cuda(device, non_blocking=True)
 
         del x_in, out, idx
         return prediction

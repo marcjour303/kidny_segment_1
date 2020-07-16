@@ -81,7 +81,6 @@ def train(train_params, common_params, data_params, net_params):
     print("final model saved @ " + str(final_model_path))
 
 
-
 def evaluate(eval_params, net_params, data_params, common_params, train_params):
 
     eval_model_path = eval_params['eval_model_path']
@@ -106,19 +105,20 @@ def evaluate(eval_params, net_params, data_params, common_params, train_params):
         quicknat_model.cuda(device)
 
     if not device:
-        quicknat_model.load_state_dict(torch.load(model_path))
-        quicknat_model.to(device)
+        #quicknat_model.load_state_dict(torch.load(model_path))
+        #quicknat_model.to(device)
+        quicknat_model = torch.load(eval_params['eval_model_path'])
     else:
         #checkpoint = torch.load(model_path)
         #quicknat_model.load_state_dict(checkpoint['state_dict'])
         #quicknat_model.load_state_dict(torch.load(model_path, map_location=device))
-
+        print("Load from eval path")
         quicknat_model = torch.load(eval_params['eval_model_path'],  map_location = device)
 
     # Load test data
     print("Loading test data")
     eval_files = du.load_volume_paths_from_case_file(data_params["data_dir"], data_params["val_data_file"])
-    eval_data = NiftiData(eval_files[:1], data_params, mode='eval')
+    eval_data = NiftiData(eval_files, data_params, mode='eval')
     eval_loader = torch.utils.data.DataLoader(eval_data, batch_size=train_params['batch_step_size'],
                                               shuffle=False, num_workers=4, pin_memory=True)
 

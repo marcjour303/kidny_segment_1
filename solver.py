@@ -10,6 +10,8 @@ from torch.optim import lr_scheduler
 import utils.common_utils as common_utils
 from utils.log_utils import LogWriter
 import utils.evaluator as eu
+import utils.data_loader as du
+
 import matplotlib.pyplot as plt
 from pathlib import Path
 import random
@@ -161,9 +163,7 @@ class Solver(object):
                 dice, ce = self.loss_func.calc_losses(output.detach(), y.detach(), class_w.detach())
 
             if i_batch % self.log_nth == 0:
-                print('[Iteration : ' + str(i_batch) + '] CE Loss -> ' + str(ce))
-                print('[Iteration : ' + str(i_batch) + '] Dice Loss -> ' + str(dice))
-                #self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
+                self.logWriter.loss_per_iter(loss.item(), dice, ce, i_batch, phase, iteration)
 
             loss_arr.append(loss.item())
             dice_loss_arr.append(dice.cpu().numpy())
@@ -184,8 +184,13 @@ class Solver(object):
         self.logWriter.loss_per_epoch("dice_loss", dice_loss_arr, phase, epoch)
         self.logWriter.loss_per_epoch("ce_loss", ce_loss_arr, phase, epoch)
 
-        self.log_results(data_loader, phase, epoch)
+        ds = eu.eval_results_per_epoch(self.model, self.device, data_loader, self.logWriter, phase, epoch)
         if phase == 'val':
+
+            if ds > self.best_ds_mean:
+                self.best_ds_mean = ds
+                self.best_ds_mean_epoch = epoch
+
             val_loss = np.mean(loss_arr)
             if self.last_val_loss != -1:
                 val_loss = np.mean(loss_arr)
@@ -196,31 +201,6 @@ class Solver(object):
             self.last_val_loss = val_loss
         return iteration
 
-    def log_results(self, data_loader, phase, epoch):
-        print("Computing model accuracy ")
-        with torch.no_grad():
-            ds = 0
-            batch_count = 0
-            for i_batch, sample_batched in enumerate(data_loader):
-                x_in = sample_batched[0].type(torch.FloatTensor)
-                labels = sample_batched[1].type(torch.LongTensor).squeeze()
-                if self.model.is_cuda:
-                    x_in, labels = x_in.cuda(self.device, non_blocking=True),\
-                                   labels.cuda(self.device, non_blocking=True)
-
-                pred = self.model.predict(x_in, self.device)
-                ds += eu.dice_score_perclass(pred, labels)
-                batch_count += 1
-                print(".", end="", flush=True)
-
-            ds = ds / batch_count
-            print("", flush=True)
-            print("Dice score ", ds)
-            self.logWriter.dice_score_per_epoch(phase, ds, epoch)
-
-            if phase == 'val' and ds > self.best_ds_mean:
-                self.best_ds_mean = ds
-                self.best_ds_mean_epoch = epoch
 
     def save_best_model(self, path):
         """

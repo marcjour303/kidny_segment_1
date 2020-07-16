@@ -37,14 +37,12 @@ def get_case_path(cid):
 
     # Make sure that case_id exists under the data_path
     case_path = os.path.join(data_path, case_id)
-    print("data path: ", str(data_path))
-    print("case id: ", case_id)
-    if not case_path.exists():
+    if not Path(case_path).exists():
         raise ValueError(
             "Case could not be found \"{}\"".format(case_path.name)
         )
 
-    return case_path
+    return Path(case_path)
 
 
 def load_volume(cid):
@@ -55,8 +53,10 @@ def load_volume(cid):
 
 def load_segmentation(cid):
     case_path = get_case_path(cid)
-    seg = nib.load(str(case_path / "only_kidney_seg.nii.gz"))
-    print(str(case_path / "only_kidney_seg.nii.gz"))
+    #seg_file_name = "segmentation.nii.gz"
+    seg_file_name = "only_kidney_seg.nii.gz"
+    seg = nib.load(str(case_path / seg_file_name))
+    print(str(case_path / seg_file_name))
 
     return seg
 
@@ -124,8 +124,8 @@ def overlay(volume_ims, segmentation_ims, segmentation, alpha):
     return overlayed
 
 
-def visualize_slice(destination, name, vol, label):
-    # Prepare output location
+def visualize_slice(destination, name, vol, label, slice_count = 50):
+
     out_path = Path(destination)
     if not out_path.exists():
         out_path.mkdir()
@@ -136,10 +136,18 @@ def visualize_slice(destination, name, vol, label):
 
     viz_ims = overlay(vol_ims, seg_ims, label, DEFAULT_OVERLAY_ALPHA)
 
-    kidney_cell_count = np.count_nonzero(np.equal(label, 1))
-
     viz_ims = viz_ims.squeeze()
     print(viz_ims.shape)
 
-    fpath = out_path / ("{:05d}.png".format(name))
-    imwrite(str(fpath), viz_ims)
+    f_path = out_path / name
+    imwrite(str(f_path), viz_ims[slice_count])
+    print(viz_ims[slice_count].shape)
+    print("Done")
+
+
+if __name__ == '__main__':
+
+    destination = os.path.join("E:\\", "vis_data")
+    cid = 3
+    volumeNifti, labelNifti = load_volume(cid).get_fdata(), load_segmentation(cid).get_fdata()
+    visualize_slice(destination=destination, name="test_slice.png", vol=volumeNifti, label=labelNifti, slice_count=200)
