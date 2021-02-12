@@ -6,6 +6,7 @@ Tool: QuickNAT: Segmenting Kidney from CT scans
  
 
 ## Getting Started
+The details of the project implementation and result can be found in [report.pdf](report.pdf)
 ### Dataset
 The dataset used for the project is KiTS19 kidney segmentation challenge [data](https://kits19.grand-challenge.org/data/). The functions 
 for loading the dataset are defined in  [kits_data_utils.py](utils/kits_data_utils.py) and [data_utils.py](utils/data_utils.py).
